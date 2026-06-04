@@ -522,8 +522,8 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
   const[filterBlock,setFilterBlock]=useState("all");
   const[filterStatus,setFilterStatus]=useState("unassigned");
 
-  const regularSitters=sitters.filter(s=>!s.prn);
-  const prnSitters=sitters.filter(s=>s.prn);
+  const regularSitters=useMemo(()=>sitters.filter(s=>!s.prn),[sitters]);
+  const prnSitters=useMemo(()=>sitters.filter(s=>s.prn),[sitters]);
 
   const matchedJobs=useMemo(()=>{
     return jobs.map(job=>{
@@ -542,12 +542,11 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
         jobs.some(j2=>j2.id!==job.id&&j2.assignedTo?.id===s.id&&j2.date===job.date)
       ).map(s=>s.id));
       const needsPRN=!job.assignedTo&&available.length===0;
-      // PRN also ranked by distance
       const prnWithDist=prnSitters.map(p=>({...p,miles:distanceMiles(p.zip,job.jobZip)}))
         .sort((a,b)=>(a.miles||999)-(b.miles||999));
       return{job,withDist,doubleUpIds,needsPRN,prnWithDist};
     });
-  },[jobs,sitters,timeOffMap]);
+  },[jobs,regularSitters,prnSitters,timeOffMap]);
 
   function assign(jobId,sitter){
     setJobs(prev=>prev.map(j=>j.id===jobId?{...j,assignedTo:j.assignedTo?.id===sitter.id?null:sitter,prnStatus:null}:j));
