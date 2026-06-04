@@ -1,9 +1,9 @@
 import { useState, useMemo, useRef } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GEO
+// GEO — zip centroids for Austin metro
 // ─────────────────────────────────────────────────────────────────────────────
-const ZIP_COORDS = {
+const ZIP_COORDS={
   "78634":[30.4977,-97.5744],"78660":[30.3955,-97.5341],"78702":[30.2577,-97.7166],
   "78703":[30.2888,-97.7566],"78704":[30.2488,-97.7666],"78717":[30.4577,-97.7566],
   "78721":[30.2677,-97.6866],"78723":[30.3077,-97.6966],"78725":[30.2463,-97.6344],
@@ -12,7 +12,6 @@ const ZIP_COORDS = {
   "78752":[30.3388,-97.7066],"78753":[30.3788,-97.6766],"78754":[30.3677,-97.6612],
   "78756":[30.3188,-97.7366],"78757":[30.3488,-97.7366],"78758":[30.3888,-97.7127],
 };
-
 function haversine([lat1,lon1],[lat2,lon2]){
   const R=3958.8,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
@@ -20,13 +19,13 @@ function haversine([lat1,lon1],[lat2,lon2]){
 }
 function distanceMiles(z1,z2){
   const a=ZIP_COORDS[z1],b=ZIP_COORDS[z2];
-  return a&&b?haversine(a,b):null;
+  return (a&&b)?haversine(a,b):null;
 }
-function distLabel(m){ return m===null?"?":m<10?`${m.toFixed(1)} mi`:`${Math.round(m)} mi`; }
+function distLabel(m){return m===null?"":m<10?`${m.toFixed(1)} mi`:`${Math.round(m)} mi`;}
 function extractJobZip(ci){
   if(!ci)return null;
   const z=(ci.split(",").pop()||"").trim();
-  return z.length===5&&/^\d{5}$/.test(z)?z:null;
+  return (z.length===5&&/^[0-9]{5}$/.test(z))?z:null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,19 +206,17 @@ function BlockBadge({blockKey,small}){
 }
 
 function SitterChip({sitter,selected,onClick,warn,miles}){
-  const distColor=miles===null?"#9ca3af":miles<=5?"#16a34a":miles<=15?"#d97706":"#6b7280";
+  const dist=distLabel(miles);
   return(
     <button onClick={onClick} style={{
       background:selected?sitter.color.bg:"#fff",
       color:selected?"#fff":sitter.color.bg,
       border:`2px solid ${sitter.color.bg}`,borderRadius:8,
-      padding:"4px 10px",fontWeight:700,fontSize:12,cursor:"pointer",
+      padding:"5px 12px",fontWeight:700,fontSize:13,cursor:"pointer",
       transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:1,
     }}>
       <span>{shortName(sitter.name)}{warn?" ⚠️":""}</span>
-      <span style={{fontSize:10,fontWeight:600,color:selected?"rgba(255,255,255,0.85)":distColor}}>
-        {distLabel(miles)}
-      </span>
+      {dist&&<span style={{fontSize:10,fontWeight:500,opacity:0.75}}>{dist}</span>}
     </button>
   );
 }
@@ -265,17 +262,14 @@ function PRNSection({job, prnSitters, onContact, onStatusChange}){
       {(!ps||ps.status==="denied")&&(
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {prnSitters.map(p=>{
-            const miles=distanceMiles(p.zip,job.jobZip);
-            const distColor=miles===null?"#9ca3af":miles<=5?"#16a34a":miles<=15?"#d97706":"#6b7280";
+
             return(
               <div key={p.id} style={{
                 border:"2px dashed #c4b5fd",borderRadius:10,padding:"6px 10px",
                 background:"#faf5ff",display:"flex",flexDirection:"column",alignItems:"center",gap:4,
               }}>
                 <span style={{fontWeight:700,fontSize:12,color:"#6d28d9"}}>{p.name}</span>
-                <span style={{fontSize:10,color:distColor,fontWeight:600}}>
-                  {distLabel(miles)}
-                </span>
+
                 <button onClick={()=>onContact(p,job)} style={{
                   background:"#7c3aed",color:"#fff",border:"none",borderRadius:6,
                   padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer",
@@ -528,7 +522,6 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
         s.blocks[job.blockKey]&&!isBlockOff(job.date,job.blockKey,timeOffMap[s.name]||[])
       );
       const withDist=available.map(s=>({sitter:s,miles:distanceMiles(s.zip,job.jobZip)}));
-      // Sort closest first — distance is informational, no hard cutoff
       withDist.sort((a,b)=>{
         if(a.miles===null)return 1;if(b.miles===null)return -1;
         return a.miles-b.miles;
@@ -656,7 +649,7 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
                       <SitterChip key={s.id} sitter={s}
                         selected={job.assignedTo?.id===s.id}
                         warn={doubleUpIds.has(s.id)}
-                        miles={miles}
+                        miles={s.miles}
                         onClick={()=>assign(job.id,s)}
                       />
                     ))}
@@ -754,7 +747,7 @@ function initSitters(){
   const regular=REGULAR_ROSTER.map((r,i)=>({
     id:i+1,name:r.name,zip:r.zip,prn:false,
     color:makeColor(i),
-    blocks:{morning:true,midday:true,evening:false,overnight:false},
+    blocks:{morning:true,midday:true,evening:true,overnight:true},
   }));
   const prn=PRN_ROSTER.map((r,i)=>({
     id:100+i,name:r.name,zip:r.zip,prn:true,
