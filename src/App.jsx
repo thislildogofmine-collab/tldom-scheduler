@@ -738,9 +738,148 @@ function MarketingFill({jobs,sitters,timeOffMap}){
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUMMARY TAB — day-by-day sitter assignments + Google Maps route
+// ─────────────────────────────────────────────────────────────────────────────
+function SummaryPanel({jobs,sitters}){
+  const dates=useMemo(()=>
+    [...new Set(jobs.filter(j=>j.assignedTo).map(j=>j.date))].sort()
+  ,[jobs]);
+  const[selectedDate,setSelectedDate]=useState(null);
+  const activeDate=selectedDate||(dates[0]||null);
+
+  const bySitter=useMemo(()=>{
+    if(!activeDate)return[];
+    const dayJobs=jobs.filter(j=>j.assignedTo&&j.date===activeDate);
+    const map={};
+    dayJobs.forEach(j=>{
+      const id=j.assignedTo.id;
+      if(!map[id])map[id]={sitter:j.assignedTo,jobs:[]};
+      map[id].jobs.push(j);
+    });
+    const blockOrder={morning:0,midday:1,evening:2,overnight:3};
+    Object.values(map).forEach(s=>{
+      s.jobs.sort((a,b)=>(blockOrder[a.blockKey]||9)-(blockOrder[b.blockKey]||9));
+    });
+    return Object.values(map).sort((a,b)=>a.sitter.name.localeCompare(b.sitter.name));
+  },[jobs,activeDate]);
+
+  function buildMapsURL(sitterData){
+    const{sitter,jobs:sJobs}=sitterData;
+    const homeZip=sitter.zip;
+    const homeCoords=ZIP_COORDS[homeZip];
+    if(!homeCoords||sJobs.length===0)return null;
+    const withDist=sJobs
+      .filter(j=>j.jobZip&&ZIP_COORDS[j.jobZip])
+      .map(j=>({j,d:distanceMiles(homeZip,j.jobZip)||0}))
+      .sort((a,b)=>b.d-a.d);
+    if(withDist.length===0){
+      const waypoints=sJobs.map(j=>j.jobZip||"Austin TX").join("/");
+      return `https://www.google.com/maps/dir/${homeZip}/${waypoints}/${homeZip}`;
+    }
+    const origin=`${homeCoords[0]},${homeCoords[1]}`;
+    const waypoints=withDist.map(({j})=>{const c=ZIP_COORDS[j.jobZip];return`${c[0]},${c[1]}`;}).join("/");
+    return`https://www.google.com/maps/dir/${origin}/${waypoints}/${origin}`;
+  }
+
+  function buildCopyText(sitterData){
+    const{sitter,jobs:sJobs}=sitterData;
+    const block=b=>BLOCKS.find(x=>x.key===b);
+    return[
+      `${formatDate(activeDate)} — ${sitter.name}`,
+      `─────────────────`,
+      ...sJobs.map((j,i)=>`${i+1}. ${block(j.blockKey)?.label} (${block(j.blockKey)?.sub}) — ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
+      ``,`Total: ${sJobs.length} job${sJobs.length!==1?"s":""}`,
+    ].join("\n");
+  }
+
+  const[copied,setCopied]=useState(null);
+  function copySchedule(id,text){
+    navigator.clipboard.writeText(text).then(()=>{setCopied(id);setTimeout(()=>setCopied(null),2500);});
+  }
+
+  if(jobs.filter(j=>j.assignedTo).length===0){
+    return(<div><h2 style={styles.sectionTitle}>🗓 Assignment Summary</h2><div style={styles.empty}>No assignments yet — go to Match tab first.</div></div>);
+  }
+
+  return(
+    <div>
+      <h2 style={styles.sectionTitle}>🗓 Assignment Summary</h2>
+      <p style={styles.hint}>Pick a day to see who's assigned what. Copy for TTP entry or tap 🗺 Route for Google Maps turn-by-turn.</p>
+
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+        {dates.map(d=>(
+          <button key={d} onClick={()=>setSelectedDate(d)} style={{
+            ...styles.tabPill,
+            background:activeDate===d?"#0f172a":"#f1f5f9",
+            color:activeDate===d?"#fff":"#374151",
+          }}>{formatDate(d)}</button>
+        ))}
+      </div>
+
+      {bySitter.length===0&&<div style={styles.empty}>No assignments for this day.</div>}
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {bySitter.map(sd=>{
+          const mapsURL=buildMapsURL(sd);
+          const copyText=buildCopyText(sd);
+          const isCopied=copied===sd.sitter.id;
+          return(
+            <div key={sd.sitter.id} style={{...styles.card,borderLeft:`4px solid ${sd.sitter.color.bg}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:sd.sitter.color.bg}}/>
+                  <span style={{fontWeight:800,fontSize:15}}>{sd.sitter.name}</span>
+                  <span style={{fontSize:11,color:"#9ca3af"}}>{sd.jobs.length} job{sd.jobs.length!==1?"s":""}</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>copySchedule(sd.sitter.id,copyText)} style={{
+                    background:isCopied?"#22c55e":"#f1f5f9",color:isCopied?"#fff":"#374151",
+                    border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",transition:"all .2s",
+                  }}>{isCopied?"✓ Copied":"📋 Copy"}</button>
+                  {mapsURL&&(
+                    <button onClick={()=>window.open(mapsURL,"_blank")} style={{
+                      background:"#1a73e8",color:"#fff",border:"none",borderRadius:6,
+                      padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",
+                    }}>🗺 Route</button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {sd.jobs.map((j,i)=>{
+                  const block=BLOCKS.find(b=>b.key===j.blockKey);
+                  return(
+                    <div key={j.id} style={{display:"flex",alignItems:"center",gap:10,background:"#f8fafc",borderRadius:8,padding:"8px 10px"}}>
+                      <span style={{background:sd.sitter.color.bg,color:"#fff",borderRadius:"50%",width:22,height:22,
+                        display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>{i+1}</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:13}}>{j.client}</div>
+                        <div style={{fontSize:11,color:"#6b7280",display:"flex",gap:6,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>
+                          <span style={{background:block?.color,color:"#fff",borderRadius:3,padding:"1px 5px",fontSize:10,fontWeight:700}}>{block?.label} {block?.sub}</span>
+                          {j.jobZip&&<span>📍 {j.jobZip}</span>}
+                        </div>
+                        {j.service&&<div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>{j.service}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {mapsURL&&<div style={{fontSize:10,color:"#9ca3af",marginTop:8,textAlign:"right"}}>Route: home → farthest first → back home</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const TABS=[
   {label:"Import",icon:"📂"},{label:"Staff",icon:"👤"},
-  {label:"Jobs",icon:"📋"},{label:"Match",icon:"⚡"},{label:"Fill",icon:"📣"},
+  {label:"Jobs",icon:"📋"},{label:"Match",icon:"⚡"},
+  {label:"Summary",icon:"🗓"},{label:"Fill",icon:"📣"},
 ];
 
 function initSitters(){
@@ -807,7 +946,8 @@ export default function App(){
         {tab===1&&<StaffPanel sitters={sitters} setSitters={setSitters} timeOffMap={timeOffMap}/>}
         {tab===2&&<JobsPanel jobs={jobs}/>}
         {tab===3&&<MatchEngine jobs={jobs} sitters={sitters} setJobs={setJobs} timeOffMap={timeOffMap}/>}
-        {tab===4&&<MarketingFill jobs={jobs} sitters={sitters} timeOffMap={timeOffMap}/>}
+        {tab===4&&<SummaryPanel jobs={jobs} sitters={sitters}/>}
+        {tab===5&&<MarketingFill jobs={jobs} sitters={sitters} timeOffMap={timeOffMap}/>}
       </div>
     </div>
   );
