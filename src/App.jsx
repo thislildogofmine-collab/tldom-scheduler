@@ -45,7 +45,7 @@ const BLOCKS=[
   {key:"overnight",label:"Overnight",sub:"6pm–8am", color:"#1E293B",light:"#f8fafc"},
 ];
 const PALETTE=["#E53935","#1E88E5","#43A047","#FB8C00","#8E24AA","#00897B","#F4511E","#3949AB","#D81B60","#546E7A"];
-const RADIUS_MILES=15;
+// Distance is informational only — no hard cutoff. All available sitters show, sorted closest first.
 
 // ── STAFF ────────────────────────────────────────────────────────────────────
 // Regular staff — confirmed pool
@@ -207,8 +207,7 @@ function BlockBadge({blockKey,small}){
 }
 
 function SitterChip({sitter,selected,onClick,warn,miles}){
-  const isOut=miles!==null&&miles>RADIUS_MILES;
-  const distColor=miles===null?"#6b7280":miles<=5?"#16a34a":miles<=RADIUS_MILES?"#d97706":"#dc2626";
+  const distColor=miles===null?"#9ca3af":miles<=5?"#16a34a":miles<=15?"#d97706":"#6b7280";
   return(
     <button onClick={onClick} style={{
       background:selected?sitter.color.bg:"#fff",
@@ -216,11 +215,10 @@ function SitterChip({sitter,selected,onClick,warn,miles}){
       border:`2px solid ${sitter.color.bg}`,borderRadius:8,
       padding:"4px 10px",fontWeight:700,fontSize:12,cursor:"pointer",
       transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:1,
-      opacity:isOut&&!selected?0.7:1,
     }}>
       <span>{shortName(sitter.name)}{warn?" ⚠️":""}</span>
       <span style={{fontSize:10,fontWeight:600,color:selected?"rgba(255,255,255,0.85)":distColor}}>
-        {distLabel(miles)}{isOut?" 📍":""}
+        {distLabel(miles)}
       </span>
     </button>
   );
@@ -268,8 +266,7 @@ function PRNSection({job, prnSitters, onContact, onStatusChange}){
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {prnSitters.map(p=>{
             const miles=distanceMiles(p.zip,job.jobZip);
-            const isOut=miles!==null&&miles>RADIUS_MILES;
-            const distColor=miles===null?"#6b7280":miles<=5?"#16a34a":miles<=RADIUS_MILES?"#d97706":"#dc2626";
+            const distColor=miles===null?"#9ca3af":miles<=5?"#16a34a":miles<=15?"#d97706":"#6b7280";
             return(
               <div key={p.id} style={{
                 border:"2px dashed #c4b5fd",borderRadius:10,padding:"6px 10px",
@@ -277,7 +274,7 @@ function PRNSection({job, prnSitters, onContact, onStatusChange}){
               }}>
                 <span style={{fontWeight:700,fontSize:12,color:"#6d28d9"}}>{p.name}</span>
                 <span style={{fontSize:10,color:distColor,fontWeight:600}}>
-                  {distLabel(miles)}{isOut?" 📍":""}
+                  {distLabel(miles)}
                 </span>
                 <button onClick={()=>onContact(p,job)} style={{
                   background:"#7c3aed",color:"#fff",border:"none",borderRadius:6,
@@ -531,10 +528,8 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
         s.blocks[job.blockKey]&&!isBlockOff(job.date,job.blockKey,timeOffMap[s.name]||[])
       );
       const withDist=available.map(s=>({sitter:s,miles:distanceMiles(s.zip,job.jobZip)}));
+      // Sort closest first — distance is informational, no hard cutoff
       withDist.sort((a,b)=>{
-        const aIn=a.miles!==null&&a.miles<=RADIUS_MILES;
-        const bIn=b.miles!==null&&b.miles<=RADIUS_MILES;
-        if(aIn&&!bIn)return -1;if(!aIn&&bIn)return 1;
         if(a.miles===null)return 1;if(b.miles===null)return -1;
         return a.miles-b.miles;
       });
@@ -619,7 +614,6 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
         {sorted.map(({job,withDist,doubleUpIds,needsPRN,prnWithDist})=>{
           const block=BLOCKS.find(b=>b.key===job.blockKey);
           const isAssigned=!!job.assignedTo;
-          const outsideOnly=withDist.length>0&&!withDist.some(d=>d.miles!==null&&d.miles<=RADIUS_MILES);
           const prnConfirmed=job.prnStatus?.status==="confirmed";
 
           return(
@@ -649,13 +643,6 @@ function MatchEngine({jobs,sitters,setJobs,timeOffMap}){
                   {job.prnStatus?.status==="pending"&&<span style={{fontSize:10,background:"#ede9fe",color:"#6d28d9",borderRadius:4,padding:"2px 6px",fontWeight:700}}>⏳ Pending</span>}
                 </div>
               </div>
-
-              {/* Outside radius notice */}
-              {outsideOnly&&!isAssigned&&(
-                <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",borderRadius:5,padding:"3px 8px",marginBottom:6}}>
-                  📍 No sitters within {RADIUS_MILES} mi — showing closest available
-                </div>
-              )}
 
               {/* Regular sitter chips */}
               {!isAssigned&&withDist.length===0?(
