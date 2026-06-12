@@ -43,19 +43,20 @@ const BLOCK_ORDER={morning:0,midday:1,evening:2,overnight:3};
 const PALETTE=["#E53935","#1E88E5","#43A047","#FB8C00","#8E24AA","#00897B","#F4511E","#3949AB","#D81B60","#546E7A"];
 
 const REGULAR_ROSTER=[
-  {name:"Alicia Kae Miller",zip:"78702"},
-  {name:"Nicholas Romano",  zip:"78735"},
-  {name:"Jonathan Tarbay",  zip:"78754"},
-  {name:"Jasmine Heyliger", zip:"78634"},
-  {name:"Monroe Page",      zip:"78758"},
-  {name:"Stefan Gill",      zip:"78717"},
-  {name:"Reagan Norman",    zip:"78660"},
-  {name:"Mark Carter",      zip:"78750"},
+  {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Boulevard, Austin, TX 78735"},
+  {name:"Nicholas Romano",  zip:"78725",address:"4627 Senda Ln, Austin, TX 78725"},
+  {name:"Jonathan Tarbay",  zip:"78634",address:"1001 McCormick Cv, Hutto, TX 78634"},
+  {name:"Jasmine Heyliger", zip:"78717",address:"14115 N Highway 183, Austin, TX 78717"},
+  {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727"},
+  {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660"},
+  {name:"Reagan Norman",    zip:"78750",address:"6500 Champion Grandview Way, Austin, TX 78750"},
+  {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702"},
 ];
+// PRN — backup pool, no time-off restrictions
 const PRN_ROSTER=[
-  {name:"Latrise", zip:"78727",telegram:"@latrisepage"},
-  {name:"Yejide",  zip:"78725",telegram:"@yejideMyers"},
-  {name:"Brianna", zip:"78727",telegram:"@BriannaVoorhies"},
+  {name:"Latrise", zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",telegram:"@latrisepage"},
+  {name:"Yejide",  zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",telegram:"@yejideMyers"},
+  {name:"Brianna", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",telegram:"@BriannaVoorhies"},
 ];
 const MARKETING_TASKS=[
   "Post Instagram reel — behind-the-scenes walk footage",
@@ -140,7 +141,6 @@ function autoMatch(jobs, sitters, timeOffMap){
   return matched;
 }
 
-// Sort a sitter's jobs geographically: home → farthest → nearest → home
 // Simple nearest-neighbor route starting from sitter's home zip.
 // At each step, pick the unvisited job closest to the current location.
 function sortJobsGeographically(jobs,sitterZip){
@@ -163,13 +163,14 @@ function sortJobsGeographically(jobs,sitterZip){
 }
 
 // Build a Google Maps directions URL.
-// Uses "ZIP, Austin, TX" text waypoints (geocodes reliably) rather than raw
-// lat/lng centroids, which Google Maps often mishandles or snaps oddly.
-function buildMapsURL(sitterZip,jobs){
-  if(!sitterZip||jobs.length===0)return null;
-  const geoJobs=sortJobsGeographically(jobs,sitterZip);
-  const toLoc=zip=>zip?encodeURIComponent(`${zip}, Austin, TX`):encodeURIComponent("Austin, TX");
-  const home=toLoc(sitterZip);
+// Home uses the sitter's full street address (precise start/end point).
+// Job stops use "ZIP, Austin, TX" text — Google geocodes this reliably.
+function buildMapsURL(sitter,jobs){
+  if(!sitter||jobs.length===0)return null;
+  const homeZip=sitter.zip;
+  const geoJobs=sortJobsGeographically(jobs,homeZip);
+  const home=encodeURIComponent(sitter.address||`${homeZip}, Austin, TX`);
+  const toLoc=zip=>encodeURIComponent(zip?`${zip}, Austin, TX`:"Austin, TX");
   const waypoints=geoJobs.map(j=>toLoc(j.jobZip)).join("/");
   return`https://www.google.com/maps/dir/${home}/${waypoints}/${home}`;
 }
@@ -234,9 +235,9 @@ function timeOffRowsToMap(rows){
 // INIT SITTERS
 // ─────────────────────────────────────────────────────────────────────────────
 function initSitters(){
-  const reg=REGULAR_ROSTER.map((r,i)=>({id:i+1,name:r.name,zip:r.zip,prn:false,color:makeColor(i),
+  const reg=REGULAR_ROSTER.map((r,i)=>({id:i+1,name:r.name,zip:r.zip,address:r.address,prn:false,color:makeColor(i),
     blocks:{morning:true,midday:true,evening:true,overnight:true}}));
-  const prn=PRN_ROSTER.map((r,i)=>({id:100+i,name:r.name,zip:r.zip,prn:true,telegram:r.telegram,
+  const prn=PRN_ROSTER.map((r,i)=>({id:100+i,name:r.name,zip:r.zip,address:r.address,prn:true,telegram:r.telegram,
     color:{bg:"#7c3aed",light:"#faf5ff"},blocks:{morning:true,midday:true,evening:true,overnight:true}}));
   return[...reg,...prn];
 }
@@ -705,7 +706,7 @@ function SummaryPanel({jobs,sitters}){
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {routes.map((r,ri)=>{
-              const mapsURL=buildMapsURL(r.sitter.zip,r.jobs);
+              const mapsURL=buildMapsURL(r.sitter,r.jobs);
               const rid=`route-${r.sitter.id}-${r.block.key}`;
               const isCopied=copied===rid;
               const routeText=[
