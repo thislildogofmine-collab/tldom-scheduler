@@ -141,33 +141,37 @@ function autoMatch(jobs, sitters, timeOffMap){
 }
 
 // Sort a sitter's jobs geographically: home → farthest → nearest → home
+// Simple nearest-neighbor route starting from sitter's home zip.
+// At each step, pick the unvisited job closest to the current location.
 function sortJobsGeographically(jobs,sitterZip){
   if(jobs.length<=1)return jobs;
   const remaining=[...jobs];
   const sorted=[];
   let currentZip=sitterZip;
   while(remaining.length>0){
-    // Find farthest from current position first (go out), then nearest on way back
-    const idx=sorted.length===0
-      ? remaining.reduce((bi,j,i)=>distMiles(currentZip,j.jobZip||currentZip)>distMiles(currentZip,remaining[bi].jobZip||currentZip)?i:bi,0)
-      : remaining.reduce((bi,j,i)=>distMiles(currentZip,j.jobZip||currentZip)<distMiles(currentZip,remaining[bi].jobZip||currentZip)?i:bi,0);
-    sorted.push(remaining[idx]);
-    currentZip=remaining[idx].jobZip||currentZip;
-    remaining.splice(idx,1);
+    let bestIdx=0,bestDist=Infinity;
+    remaining.forEach((j,i)=>{
+      const z=j.jobZip||currentZip;
+      const d=distMiles(currentZip,z);
+      if(d<bestDist){bestDist=d;bestIdx=i;}
+    });
+    sorted.push(remaining[bestIdx]);
+    currentZip=remaining[bestIdx].jobZip||currentZip;
+    remaining.splice(bestIdx,1);
   }
   return sorted;
 }
 
+// Build a Google Maps directions URL.
+// Uses "ZIP, Austin, TX" text waypoints (geocodes reliably) rather than raw
+// lat/lng centroids, which Google Maps often mishandles or snaps oddly.
 function buildMapsURL(sitterZip,jobs){
-  const homeC=ZIP_COORDS[sitterZip];
-  if(!homeC||jobs.length===0)return null;
+  if(!sitterZip||jobs.length===0)return null;
   const geoJobs=sortJobsGeographically(jobs,sitterZip);
-  const origin=`${homeC[0]},${homeC[1]}`;
-  const waypoints=geoJobs.map(j=>{
-    const c=ZIP_COORDS[j.jobZip];
-    return c?`${c[0]},${c[1]}`:(j.jobZip||"Austin TX");
-  }).join("/");
-  return`https://www.google.com/maps/dir/${origin}/${waypoints}/${origin}`;
+  const toLoc=zip=>zip?encodeURIComponent(`${zip}, Austin, TX`):encodeURIComponent("Austin, TX");
+  const home=toLoc(sitterZip);
+  const waypoints=geoJobs.map(j=>toLoc(j.jobZip)).join("/");
+  return`https://www.google.com/maps/dir/${home}/${waypoints}/${home}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
