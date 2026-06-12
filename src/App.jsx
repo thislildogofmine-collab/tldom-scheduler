@@ -126,15 +126,12 @@ function autoMatch(jobs, sitters, timeOffMap){
     );
     if(available.length===0)return{...job,assignedTo:null,prnStatus:null};
 
-    // Score: primary = fewest assignments (even distribution), tiebreaker = distance
-    const scored=available.map(s=>({
-      s,
-      count:counts[s.id]||0,
-      dist:distMiles(s.zip,job.jobZip),
-    }));
+    // Pure even distribution — fewest assignments so far wins.
+    // Tiebreak by sitter id order (stable, predictable) — no distance factor.
+    const scored=available.map(s=>({s,count:counts[s.id]||0}));
     scored.sort((a,b)=>{
-      if(a.count!==b.count)return a.count-b.count; // fewer assignments first
-      return a.dist-b.dist; // closer first as tiebreaker
+      if(a.count!==b.count)return a.count-b.count;
+      return a.s.id-b.s.id;
     });
     const winner=scored[0].s;
     counts[winner.id]=(counts[winner.id]||0)+1;
@@ -588,33 +585,46 @@ function SummaryPanel({jobs,sitters}){
   const[selectedDate,setSelectedDate]=useState(null);
   const activeDate=selectedDate||(dates[0]||null);
 
-  const bySitter=useMemo(()=>{
+  // Jobs for the active date, grouped by time block
+  const byBlock=useMemo(()=>{
     if(!activeDate)return[];
     const dayJobs=jobs.filter(j=>j.assignedTo&&j.date===activeDate);
-    const map={};
+    return BLOCKS.map(b=>({
+      block:b,
+      jobs:dayJobs.filter(j=>j.blockKey===b.key)
+        .sort((a,b2)=>a.client.localeCompare(b2.client)),
+    })).filter(g=>g.jobs.length>0);
+  },[jobs,activeDate]);
+
+  // Routes: per sitter, per block (only build a route if sitter has 2+ jobs in that block)
+  const routes=useMemo(()=>{
+    if(!activeDate)return[];
+    const dayJobs=jobs.filter(j=>j.assignedTo&&j.date===activeDate);
+    const map={}; // key: sitterId-blockKey
     dayJobs.forEach(j=>{
-      const id=j.assignedTo.id;
-      if(!map[id])map[id]={sitter:j.assignedTo,jobs:[]};
-      map[id].jobs.push(j);
+      const key=`${j.assignedTo.id}-${j.blockKey}`;
+      if(!map[key])map[key]={sitter:j.assignedTo,block:BLOCKS.find(b=>b.key===j.blockKey),jobs:[]};
+      map[key].jobs.push(j);
     });
-    Object.values(map).forEach(s=>{
-      // Sort geographically within each block group
-      s.jobs=sortJobsGeographically(s.jobs,s.sitter.zip);
-    });
-    return Object.values(map).sort((a,b)=>a.sitter.name.localeCompare(b.sitter.name));
+    return Object.values(map)
+      .filter(r=>r.jobs.length>=2) // routes only make sense with 2+ stops
+      .map(r=>({...r,jobs:sortJobsGeographically(r.jobs,r.sitter.zip)}))
+      .sort((a,b)=>{
+        const bo=BLOCK_ORDER[a.block.key]-BLOCK_ORDER[b.block.key];
+        return bo!==0?bo:a.sitter.name.localeCompare(b.sitter.name);
+      });
   },[jobs,activeDate]);
 
   const[copied,setCopied]=useState(null);
-  function copySchedule(id,text){
+  function copyText(id,text){
     navigator.clipboard.writeText(text).then(()=>{setCopied(id);setTimeout(()=>setCopied(null),2500);});
   }
-  function buildCopyText(sd){
-    const block=b=>BLOCKS.find(x=>x.key===b);
+
+  function buildBlockCopyText(group){
     return[
-      `${fmtDate(activeDate)} — ${sd.sitter.name}`,
+      `${fmtDate(activeDate)} — ${group.block.label} (${group.block.sub})`,
       `─────────────────`,
-      ...sd.jobs.map((j,i)=>`${i+1}. ${block(j.blockKey)?.label} (${block(j.blockKey)?.sub}) — ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
-      ``,`Total: ${sd.jobs.length} job${sd.jobs.length!==1?"s":""}`,
+      ...group.jobs.map(j=>`${j.assignedTo?shortName(j.assignedTo.name):"🔴 UNASSIGNED"} — ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
     ].join("\n");
   }
 
@@ -626,7 +636,7 @@ function SummaryPanel({jobs,sitters}){
   return(
     <div>
       <h2 style={styles.sectionTitle}>🗓 Summary</h2>
-      <p style={styles.hint}>Day-by-day assignments in geographic order. Copy for TTP entry or tap 🗺 for turn-by-turn.</p>
+      <p style={styles.hint}>Who's working what, by time block. Routes below for sitters with multiple stops in a block.</p>
 
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16,overflowX:"auto"}}>
         {dates.map(d=>(
@@ -638,59 +648,105 @@ function SummaryPanel({jobs,sitters}){
         ))}
       </div>
 
-      {bySitter.length===0&&<div style={styles.empty}>No assignments for this day.</div>}
+      {byBlock.length===0&&<div style={styles.empty}>No assignments for this day.</div>}
 
-      <div style={{display:"flex",flexDirection:"column",gap:12}}>
-        {bySitter.map(sd=>{
-          const mapsURL=buildMapsURL(sd.sitter.zip,sd.jobs);
-          const copyText=buildCopyText(sd);
-          const isCopied=copied===sd.sitter.id;
+      {/* Time-block sections */}
+      <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:routes.length>0?20:0}}>
+        {byBlock.map(group=>{
+          const isCopied=copied===`block-${group.block.key}`;
           return(
-            <div key={sd.sitter.id} style={{...styles.card,borderLeft:`4px solid ${sd.sitter.color.bg}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:10,height:10,borderRadius:"50%",background:sd.sitter.color.bg}}/>
-                  <span style={{fontWeight:800,fontSize:15}}>{sd.sitter.name}</span>
-                  <span style={{fontSize:11,color:"#9ca3af"}}>{sd.jobs.length} job{sd.jobs.length!==1?"s":""}</span>
+            <div key={group.block.key} style={{...styles.card,borderLeft:`4px solid ${group.block.color}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div>
+                  <span style={{fontWeight:800,fontSize:14}}>{group.block.label}</span>
+                  <span style={{fontSize:11,color:"#9ca3af",marginLeft:6}}>{group.block.sub} · {group.jobs.length} job{group.jobs.length!==1?"s":""}</span>
                 </div>
-                <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>copySchedule(sd.sitter.id,copyText)} style={{
-                    background:isCopied?"#22c55e":"#f1f5f9",color:isCopied?"#fff":"#374151",
-                    border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                    {isCopied?"✓ Copied":"📋 Copy"}
-                  </button>
-                  {mapsURL&&<button onClick={()=>window.open(mapsURL,"_blank")} style={{
-                    background:"#1a73e8",color:"#fff",border:"none",borderRadius:6,
-                    padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🗺 Route</button>}
-                </div>
+                <button onClick={()=>copyText(`block-${group.block.key}`,buildBlockCopyText(group))} style={{
+                  background:isCopied?"#22c55e":"#f1f5f9",color:isCopied?"#fff":"#374151",
+                  border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                  {isCopied?"✓ Copied":"📋 Copy"}
+                </button>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                {sd.jobs.map((j,i)=>{
-                  const block=BLOCKS.find(b=>b.key===j.blockKey);
-                  return(
-                    <div key={j.id} style={{display:"flex",alignItems:"center",gap:10,
-                      background:"#f8fafc",borderRadius:8,padding:"8px 10px"}}>
-                      <span style={{background:sd.sitter.color.bg,color:"#fff",borderRadius:"50%",
-                        width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:11,fontWeight:700,flexShrink:0}}>{i+1}</span>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:700,fontSize:13}}>{j.client}</div>
-                        <div style={{fontSize:11,color:"#6b7280",display:"flex",gap:6,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>
-                          <BlockBadge blockKey={j.blockKey} small/>
-                          {j.jobZip&&<span>📍 {j.jobZip}</span>}
-                        </div>
-                        {j.service&&<div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>{j.service}</div>}
+                {group.jobs.map(j=>(
+                  <div key={j.id} style={{display:"flex",alignItems:"center",gap:10,
+                    background:j.assignedTo?j.assignedTo.color.light:"#fff1f1",
+                    borderRadius:8,padding:"8px 10px"}}>
+                    <span style={{
+                      background:j.assignedTo?j.assignedTo.color.bg:"#ef4444",color:"#fff",
+                      borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700,flexShrink:0,minWidth:60,textAlign:"center"}}>
+                      {j.assignedTo?shortName(j.assignedTo.name):"🔴 OPEN"}
+                    </span>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:13}}>{j.client}</div>
+                      <div style={{fontSize:11,color:"#6b7280",display:"flex",gap:6,alignItems:"center",marginTop:1,flexWrap:"wrap"}}>
+                        {j.jobZip&&<span>📍 {j.jobZip}</span>}
+                        {j.service&&<span>{j.service}</span>}
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
-              {mapsURL&&<div style={{fontSize:10,color:"#9ca3af",marginTop:8,textAlign:"right"}}>
-                Route: home → geographic order → back home</div>}
             </div>
           );
         })}
       </div>
+
+      {/* Routes section */}
+      {routes.length>0&&(
+        <>
+          <h3 style={{fontSize:14,fontWeight:800,marginBottom:8,color:"#1a1a2e"}}>🗺 Suggested Routes</h3>
+          <p style={{fontSize:11,color:"#9ca3af",marginTop:0,marginBottom:10,lineHeight:1.5}}>
+            For sitters with 2+ stops in the same block — home → geographic order → back home.
+          </p>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {routes.map((r,ri)=>{
+              const mapsURL=buildMapsURL(r.sitter.zip,r.jobs);
+              const rid=`route-${r.sitter.id}-${r.block.key}`;
+              const isCopied=copied===rid;
+              const routeText=[
+                `${r.sitter.name} — ${r.block.label} (${fmtDate(activeDate)})`,
+                `─────────────────`,
+                ...r.jobs.map((j,i)=>`${i+1}. ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
+              ].join("\n");
+              return(
+                <div key={ri} style={{...styles.card,borderLeft:`4px solid ${r.sitter.color.bg}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:10,height:10,borderRadius:"50%",background:r.sitter.color.bg}}/>
+                      <span style={{fontWeight:800,fontSize:14}}>{r.sitter.name}</span>
+                      <BlockBadge blockKey={r.block.key} small/>
+                      <span style={{fontSize:11,color:"#9ca3af"}}>{r.jobs.length} stops</span>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>copyText(rid,routeText)} style={{
+                        background:isCopied?"#22c55e":"#f1f5f9",color:isCopied?"#fff":"#374151",
+                        border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        {isCopied?"✓ Copied":"📋 Copy"}
+                      </button>
+                      {mapsURL&&<button onClick={()=>window.open(mapsURL,"_blank")} style={{
+                        background:"#1a73e8",color:"#fff",border:"none",borderRadius:6,
+                        padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🗺 Route</button>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                    {r.jobs.map((j,i)=>(
+                      <div key={j.id} style={{display:"flex",alignItems:"center",gap:8,
+                        background:"#f8fafc",borderRadius:6,padding:"5px 8px"}}>
+                        <span style={{background:r.sitter.color.bg,color:"#fff",borderRadius:"50%",
+                          width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:10,fontWeight:700,flexShrink:0}}>{i+1}</span>
+                        <span style={{fontSize:12,fontWeight:600}}>{j.client}</span>
+                        {j.jobZip&&<span style={{fontSize:11,color:"#9ca3af"}}>📍 {j.jobZip}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
