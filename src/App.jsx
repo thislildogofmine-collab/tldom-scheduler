@@ -709,11 +709,26 @@ function SummaryPanel({jobs,sitters}){
               const mapsURL=buildMapsURL(r.sitter,r.jobs);
               const rid=`route-${r.sitter.id}-${r.block.key}`;
               const isCopied=copied===rid;
-              const routeText=[
-                `${r.sitter.name} — ${r.block.label} (${fmtDate(activeDate)})`,
-                `─────────────────`,
-                ...r.jobs.map((j,i)=>`${i+1}. ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
-              ].join("\n");
+              const routeText=(()=>{
+                const lines=[
+                  `${r.sitter.name} — ${r.block.label} (${fmtDate(activeDate)})`,
+                  `─────────────────`,
+                  ...r.jobs.map((j,i)=>`${i+1}. ${j.client}${j.jobZip?` · ${j.jobZip}`:""}`),
+                  ``,`Route order (home → stops → home), est. miles:`,
+                ];
+                let prevZip=r.sitter.zip,prevLabel="Home",total=0;
+                r.jobs.forEach((j,i)=>{
+                  const d=distMiles(prevZip,j.jobZip||prevZip);
+                  total+=isFinite(d)?d:0;
+                  lines.push(`  ${prevLabel} → ${i+1}. ${j.client}: ${isFinite(d)?d.toFixed(1):"—"} mi`);
+                  prevZip=j.jobZip||prevZip;prevLabel=`${i+1}. ${j.client}`;
+                });
+                const dHome=distMiles(prevZip,r.sitter.zip);
+                total+=isFinite(dHome)?dHome:0;
+                lines.push(`  ${prevLabel} → Home: ${isFinite(dHome)?dHome.toFixed(1):"—"} mi`);
+                lines.push(`Total: ${total.toFixed(1)} mi`);
+                return lines.join("\n");
+              })();
               return(
                 <div key={ri} style={{...styles.card,borderLeft:`4px solid ${r.sitter.color.bg}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -745,6 +760,47 @@ function SummaryPanel({jobs,sitters}){
                         {j.jobZip&&<span style={{fontSize:11,color:"#9ca3af"}}>📍 {j.jobZip}</span>}
                       </div>
                     ))}
+                  </div>
+
+                  {/* Written leg-by-leg route breakdown — works even if Maps link misbehaves */}
+                  <div style={{marginTop:8,paddingTop:8,borderTop:"1px dashed #e5e7eb"}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",letterSpacing:".05em",marginBottom:4}}>
+                      ROUTE ORDER (est. straight-line miles)
+                    </div>
+                    {(()=>{
+                      const legs=[];
+                      let prevZip=r.sitter.zip;
+                      let prevLabel=`🏠 Home (${r.sitter.zip})`;
+                      let total=0;
+                      r.jobs.forEach((j,i)=>{
+                        const d=distMiles(prevZip,j.jobZip||prevZip);
+                        total+=isFinite(d)?d:0;
+                        legs.push({from:prevLabel,to:`${i+1}. ${j.client}${j.jobZip?` (${j.jobZip})`:""}`,d});
+                        prevZip=j.jobZip||prevZip;
+                        prevLabel=`${i+1}. ${j.client}`;
+                      });
+                      const dHome=distMiles(prevZip,r.sitter.zip);
+                      total+=isFinite(dHome)?dHome:0;
+                      legs.push({from:prevLabel,to:"🏠 Home",d:dHome});
+                      return(
+                        <>
+                          {legs.map((leg,i)=>(
+                            <div key={i} style={{display:"flex",justifyContent:"space-between",
+                              fontSize:11,color:"#4b5563",padding:"2px 0"}}>
+                              <span>{leg.from} → {leg.to}</span>
+                              <span style={{color:"#9ca3af",fontWeight:600,whiteSpace:"nowrap",marginLeft:8}}>
+                                {isFinite(leg.d)?`${leg.d.toFixed(1)} mi`:"—"}
+                              </span>
+                            </div>
+                          ))}
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,
+                            fontWeight:700,color:"#374151",borderTop:"1px solid #e5e7eb",marginTop:4,paddingTop:4}}>
+                            <span>Total estimated</span>
+                            <span>{total.toFixed(1)} mi</span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               );
