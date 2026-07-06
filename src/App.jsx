@@ -49,14 +49,14 @@ const REGULAR_ROSTER=[
   {name:"Jasmine Heyliger", zip:"78717",address:"14115 N Highway 183, Austin, TX 78717"},
   {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727"},
   {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660"},
-  {name:"Reagan Norman",    zip:"78750",address:"6500 Champion Grandview Way, Austin, TX 78750"},
+  {name:"Christine Keith",  zip:"78731",address:"4201 N. Hills Dr, Austin, TX 78731"},
   {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702"},
 ];
-// PRN — backup pool, no time-off restrictions
+// PRN — full names must match TTP exactly for time-off lookup
 const PRN_ROSTER=[
-  {name:"Latrise", zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",telegram:"@latrisepage"},
-  {name:"Yejide",  zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",telegram:"@yejideMyers"},
-  {name:"Brianna", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",telegram:"@BriannaVoorhies"},
+  {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",  telegram:"@latrisepage"},
+  {name:"Yejide Myers",     zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",  telegram:"@yejideMyers"},
+  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",        telegram:"@BriannaVoorhies"},
 ];
 const MARKETING_TASKS=[
   "Post Instagram reel — behind-the-scenes walk footage",
@@ -87,13 +87,28 @@ function fmtDateShort(d){return new Date(d+"T12:00:00").toLocaleDateString("en-U
 function isBlockOff(dateStr,blockKey,timeOffs){
   const ranges={morning:[7,10],midday:[11,15],evening:[17,20],overnight:[18,32]};
   const[bS,bE]=ranges[blockKey]||[0,0];
-  const base=new Date(dateStr+"T00:00:00");
-  const bs=new Date(base);bs.setHours(bS,0,0,0);
-  const be=new Date(base);be.setHours(bE>24?bE-24:bE,0,0,0);
+  // Parse the date as local noon to avoid any UTC offset flipping the date
+  const base=new Date(`${dateStr}T12:00:00`);
+  const baseDay=new Date(base);
+  const bs=new Date(baseDay);bs.setHours(bS,0,0,0);
+  const be=new Date(baseDay);be.setHours(bE>24?bE-24:bE,0,0,0);
   if(bE>24)be.setDate(be.getDate()+1);
+
   return timeOffs.some(to=>{
-    const s=parseISO(to.startISO),e=parseISO(to.endISO);
-    return s&&e&&bs<e&&be>s;
+    if(!to.startISO)return false;
+    // TTP timestamps: "2026-06-10T07:00:00-0500"
+    // Parse by extracting date and time parts directly, ignoring tz offset
+    // so we compare in local/wall-clock time as the sitter intended
+    const parseWallClock=iso=>{
+      const m=iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+      if(!m)return null;
+      const d=new Date(`${m[1]}T${m[2]}:${m[3]}:00`);
+      return d;
+    };
+    const s=parseWallClock(to.startISO);
+    const e=parseWallClock(to.endISO||to.startISO);
+    if(!s||!e)return false;
+    return bs<e&&be>s;
   });
 }
 
@@ -368,7 +383,7 @@ function ImportPanel({onImport,jobCount,toCount}){
         <div style={{fontSize:11,fontWeight:700,color:"#6d28d9",marginBottom:6,letterSpacing:".05em"}}>PRN BACKUP TEAM</div>
         {PRN_ROSTER.map(p=>(
           <div key={p.name} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#4c1d95",marginBottom:2}}>
-            <span>🔄 <strong>{p.name}</strong></span>
+            <span>🔄 <strong>{shortName(p.name)}</strong></span>
             <span style={{color:p.telegram?"#6d28d9":"#9ca3af"}}>{p.telegram||"@handle pending"}</span>
           </div>
         ))}
