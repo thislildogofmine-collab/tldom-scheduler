@@ -51,8 +51,10 @@ const REGULAR_ROSTER=[
   {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660"},
   {name:"Christine Keith",  zip:"78731",address:"4201 N. Hills Dr, Austin, TX 78731"},
   {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702"},
+  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725"},
 ];
 // PRN — full names must match TTP exactly for time-off lookup
+// Brianna is also in regular roster — she appears here as backup for unmatched jobs
 const PRN_ROSTER=[
   {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",  telegram:"@latrisepage"},
   {name:"Yejide Myers",     zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",  telegram:"@yejideMyers"},
