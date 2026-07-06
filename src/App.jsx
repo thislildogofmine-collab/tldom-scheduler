@@ -395,11 +395,8 @@ function ImportPanel({onImport,jobCount,toCount}){
 // ─────────────────────────────────────────────────────────────────────────────
 // CALENDAR VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function CalendarPanel({jobs,sitters,setJobs,timeOffMap}){
-  const[view,setView]=useState("2week"); // "2week" | "month"
-  const[refDate,setRefDate]=useState(()=>{
-    const d=new Date();d.setDate(1);return d;
-  });
+function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
+  const[view,setView]=useState("2week");
   const[selectedJob,setSelectedJob]=useState(null);
   const prnSitters=sitters.filter(s=>s.prn);
 
@@ -407,23 +404,23 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap}){
   const days=useMemo(()=>{
     const result=[];
     if(view==="2week"){
-      // Start from Monday of current week
-      const start=new Date(refDate);
-      const dow=start.getDay();
-      start.setDate(start.getDate()-(dow===0?6:dow-1));
+      // Start from the Sunday on or before refDate
+      const start=new Date(refDate.getFullYear(),refDate.getMonth(),refDate.getDate());
+      const dow=start.getDay(); // 0=Sun,1=Mon,...6=Sat
+      start.setDate(start.getDate()-dow); // roll back to Sunday
       for(let i=0;i<14;i++){
         const d=new Date(start);d.setDate(start.getDate()+i);
-        result.push(d.toISOString().split("T")[0]);
+        // Use local date string to avoid UTC offset shifting the date
+        result.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
       }
     }else{
-      // Full month
-      const start=new Date(refDate.getFullYear(),refDate.getMonth(),1);
-      const end=new Date(refDate.getFullYear(),refDate.getMonth()+1,0);
-      // Pad to start on Sunday
-      const startPad=start.getDay();
-      for(let i=-startPad;i<=end.getDate()-1;i++){
-        const d=new Date(start);d.setDate(start.getDate()+i);
-        result.push(d.toISOString().split("T")[0]);
+      // Full month — pad to start on Sunday
+      const year=refDate.getFullYear(),month=refDate.getMonth();
+      const firstDay=new Date(year,month,1).getDay();
+      const daysInMonth=new Date(year,month+1,0).getDate();
+      for(let i=-firstDay;i<daysInMonth;i++){
+        const d=new Date(year,month,1+i);
+        result.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
       }
     }
     return result;
@@ -892,6 +889,7 @@ export default function App(){
   const[sitters]=useState(initSitters);
   const[jobs,setJobs]=useState([]);
   const[timeOffMap,setTimeOffMap]=useState({});
+  const[calendarRef,setCalendarRef]=useState(()=>new Date());
 
   function handleImport(type,data){
     if(type==="jobs"){
@@ -915,6 +913,12 @@ export default function App(){
     if(type==="jobs"){
       const matched=autoMatch(data,sitters,timeOffMap);
       setJobs(matched);
+      // Auto-jump calendar to first job date
+      const dates=data.map(j=>j.date).filter(Boolean).sort();
+      if(dates.length>0){
+        const[y,m,d]=dates[0].split("-").map(Number);
+        setCalendarRef(new Date(y,m-1,d));
+      }
     }
     if(type==="timeoff"){
       setTimeOffMap(data);
@@ -962,7 +966,7 @@ export default function App(){
 
       <div style={styles.content}>
         {tab===0&&<ImportPanel onImport={handleImportFinal} jobCount={jobs.length} toCount={Object.keys(timeOffMap).length}/>}
-        {tab===1&&<CalendarPanel jobs={jobs} sitters={sitters} setJobs={setJobs} timeOffMap={timeOffMap}/>}
+        {tab===1&&<CalendarPanel jobs={jobs} sitters={sitters} setJobs={setJobs} timeOffMap={timeOffMap} refDate={calendarRef} setRefDate={setCalendarRef}/>}
         {tab===2&&<SummaryPanel jobs={jobs} sitters={sitters}/>}
         {tab===3&&<MarketingFill jobs={jobs} sitters={sitters} timeOffMap={timeOffMap}/>}
       </div>
