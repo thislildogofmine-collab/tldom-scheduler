@@ -42,23 +42,51 @@ const BLOCKS=[
 const BLOCK_ORDER={morning:0,midday:1,evening:2,overnight:3};
 const PALETTE=["#E53935","#1E88E5","#43A047","#FB8C00","#8E24AA","#00897B","#F4511E","#3949AB","#D81B60","#546E7A"];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ZONE SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+const ZONES={
+  "Zone 1":{label:"Zone 1",color:"#0891b2",light:"#ecfeff", zips:["78759","78758","78727"]},
+  "Zone 2":{label:"Zone 2",color:"#7c3aed",light:"#faf5ff", zips:["78660","78753","78754"]},
+  "Zone 3":{label:"Zone 3",color:"#059669",light:"#ecfdf5", zips:["78757","78756","78752","78751","78705","78712","78723","78731"]},
+  "Zone 4":{label:"Zone 4",color:"#dc2626",light:"#fff1f1", zips:["78703","78701","78721","78722","78702","78704","78745","78725","78735"]},
+};
+// Which zones can overflow into which
+const ZONE_ADJACENT={
+  "Zone 1":["Zone 2","Zone 3"],
+  "Zone 2":["Zone 1","Zone 3"],
+  "Zone 3":["Zone 1","Zone 2","Zone 4"],
+  "Zone 4":["Zone 3"],
+};
+// Map each zip to its zone
+const ZIP_TO_ZONE={};
+Object.entries(ZONES).forEach(([zk,zv])=>zv.zips.forEach(z=>ZIP_TO_ZONE[z]=zk));
+
+function getJobZone(jobZip){return ZIP_TO_ZONE[jobZip]||null;}
+function canCoverZone(sitter,jobZone){
+  if(!jobZone)return true; // no zone data = always eligible
+  if(sitter.primaryZone===jobZone)return true;
+  if((sitter.adjacentZones||[]).includes(jobZone))return true;
+  return false;
+}
+
+const MAX_JOBS_PER_BLOCK=5;
+
 const REGULAR_ROSTER=[
-  {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Boulevard, Austin, TX 78735"},
-  {name:"Nicholas Romano",  zip:"78725",address:"4627 Senda Ln, Austin, TX 78725"},
-  {name:"Jonathan Tarbay",  zip:"78634",address:"1001 McCormick Cv, Hutto, TX 78634"},
-  {name:"Jasmine Heyliger", zip:"78717",address:"14115 N Highway 183, Austin, TX 78717"},
-  {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727"},
-  {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660"},
-  {name:"Christine Keith",  zip:"78731",address:"4201 N. Hills Dr, Austin, TX 78731"},
-  {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702"},
-  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725"},
+  {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Boulevard, Austin, TX 78735",  primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Nicholas Romano",  zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Jonathan Tarbay",  zip:"78634",address:"1001 McCormick Cv, Hutto, TX 78634",        primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
+  {name:"Jasmine Heyliger", zip:"78717",address:"14115 N Highway 183, Austin, TX 78717",     primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
+  {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",      primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
+  {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660",    primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
+  {name:"Christine Keith",  zip:"78731",address:"4201 N. Hills Dr, Austin, TX 78731",        primaryZone:"Zone 3",adjacentZones:["Zone 1","Zone 2","Zone 4"]},
+  {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702",          primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
 ];
-// PRN — full names must match TTP exactly for time-off lookup
-// Brianna is also in regular roster — she appears here as backup for unmatched jobs
 const PRN_ROSTER=[
-  {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",  telegram:"@latrisepage"},
-  {name:"Yejide Myers",     zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",  telegram:"@yejideMyers"},
-  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",        telegram:"@BriannaVoorhies"},
+  {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",      primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"],telegram:"@latrisepage"},
+  {name:"Yejide Myers",     zip:"78754",address:"3613 Long Day Drive, Austin, TX 78754",      primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"],telegram:"@yejideMyers"},
+  {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",            primaryZone:"Zone 4",adjacentZones:["Zone 3"],          telegram:"@BriannaVoorhies"},
 ];
 const MARKETING_TASKS=[
   "Post Instagram reel — behind-the-scenes walk footage",
@@ -133,27 +161,61 @@ function openTelegram(prn,job){
 // ─────────────────────────────────────────────────────────────────────────────
 function autoMatch(jobs, sitters, timeOffMap){
   const regularSitters=sitters.filter(s=>!s.prn);
-  // Track assignment counts per sitter for even distribution
-  const counts={};
-  regularSitters.forEach(s=>counts[s.id]=0);
+
+  // Track counts per sitter per date+block for cap enforcement
+  // key: `sitterId-date-blockKey`
+  const blockCounts={};
+  const getCount=(sid,date,block)=>blockCounts[`${sid}-${date}-${block}`]||0;
+  const incCount=(sid,date,block)=>{
+    const k=`${sid}-${date}-${block}`;
+    blockCounts[k]=(blockCounts[k]||0)+1;
+  };
 
   const matched=jobs.map(job=>{
-    // Find available sitters for this block/date
+    const jobZone=getJobZone(job.jobZip);
+
+    // Step 1: sitters available (not on time off)
     const available=regularSitters.filter(s=>
       !isBlockOff(job.date,job.blockKey,timeOffMap[s.name]||[])
     );
-    if(available.length===0)return{...job,assignedTo:null,prnStatus:null};
+    if(available.length===0)return{...job,assignedTo:null,alternative:null,overCap:false,prnStatus:null};
 
-    // Pure even distribution — fewest assignments so far wins.
-    // Tiebreak by sitter id order (stable, predictable) — no distance factor.
-    const scored=available.map(s=>({s,count:counts[s.id]||0}));
-    scored.sort((a,b)=>{
-      if(a.count!==b.count)return a.count-b.count;
-      return a.s.id-b.s.id;
+    // Step 2: zone filter — primary zone first, then adjacent, then anyone
+    const inPrimary=available.filter(s=>s.primaryZone===jobZone);
+    const inAdjacent=available.filter(s=>s.primaryZone!==jobZone&&(s.adjacentZones||[]).includes(jobZone));
+    const anyZone=available.filter(s=>!inPrimary.includes(s)&&!inAdjacent.includes(s));
+
+    // Tier order: primary → adjacent → any (for when zone has no coverage)
+    const tierOrder=[...inPrimary,...inAdjacent,...anyZone];
+
+    // Step 3: score by count within block (even distribution), under-cap first
+    const score=s=>({
+      s,
+      count:getCount(s.id,job.date,job.blockKey),
+      atCap:getCount(s.id,job.date,job.blockKey)>=MAX_JOBS_PER_BLOCK,
     });
-    const winner=scored[0].s;
-    counts[winner.id]=(counts[winner.id]||0)+1;
-    return{...job,assignedTo:winner,prnStatus:null};
+    const scored=tierOrder.map(score);
+
+    // Prefer under-cap sitters; if all at cap, still assign best fit
+    const underCap=scored.filter(x=>!x.atCap);
+    const pool=underCap.length>0?underCap:scored;
+    pool.sort((a,b)=>a.count!==b.count?a.count-b.count:a.s.id-b.s.id);
+
+    const winner=pool[0].s;
+    const overCap=getCount(winner.id,job.date,job.blockKey)>=MAX_JOBS_PER_BLOCK;
+    incCount(winner.id,job.date,job.blockKey);
+
+    // Step 4: find best alternative (next best available, different sitter)
+    let alternative=null;
+    if(overCap||pool.length>1){
+      const altPool=scored.filter(x=>x.s.id!==winner.id);
+      if(altPool.length>0){
+        altPool.sort((a,b)=>a.count!==b.count?a.count-b.count:a.s.id-b.s.id);
+        alternative=altPool[0].s;
+      }
+    }
+
+    return{...job,assignedTo:winner,alternative,overCap,prnStatus:null};
   });
   return matched;
 }
@@ -252,10 +314,19 @@ function timeOffRowsToMap(rows){
 // INIT SITTERS
 // ─────────────────────────────────────────────────────────────────────────────
 function initSitters(){
-  const reg=REGULAR_ROSTER.map((r,i)=>({id:i+1,name:r.name,zip:r.zip,address:r.address,prn:false,color:makeColor(i),
-    blocks:{morning:true,midday:true,evening:true,overnight:true}}));
-  const prn=PRN_ROSTER.map((r,i)=>({id:100+i,name:r.name,zip:r.zip,address:r.address,prn:true,telegram:r.telegram,
-    color:{bg:"#7c3aed",light:"#faf5ff"},blocks:{morning:true,midday:true,evening:true,overnight:true}}));
+  const reg=REGULAR_ROSTER.map((r,i)=>({
+    id:i+1,name:r.name,zip:r.zip,address:r.address,
+    primaryZone:r.primaryZone,adjacentZones:r.adjacentZones,
+    prn:false,color:makeColor(i),
+    blocks:{morning:true,midday:true,evening:true,overnight:true},
+  }));
+  const prn=PRN_ROSTER.map((r,i)=>({
+    id:100+i,name:r.name,zip:r.zip,address:r.address,
+    primaryZone:r.primaryZone,adjacentZones:r.adjacentZones,
+    prn:true,telegram:r.telegram,
+    color:{bg:"#7c3aed",light:"#faf5ff"},
+    blocks:{morning:true,midday:true,evening:true,overnight:true},
+  }));
   return[...reg,...prn];
 }
 
@@ -268,6 +339,14 @@ function BlockBadge({blockKey,small}){
   return<span style={{background:b.color,color:"#fff",borderRadius:4,
     padding:small?"1px 4px":"2px 7px",fontSize:small?9:11,fontWeight:700,whiteSpace:"nowrap"}}>
     {b.label}</span>;
+}
+
+function ZoneBadge({zone,small}){
+  const z=ZONES[zone];
+  if(!z)return null;
+  return<span style={{background:z.color,color:"#fff",borderRadius:4,
+    padding:small?"1px 4px":"2px 7px",fontSize:small?9:10,fontWeight:700,whiteSpace:"nowrap"}}>
+    {z.label}</span>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -478,13 +557,21 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
         </div>
       </div>
 
-      {/* Legend */}
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+      {/* Sitter legend */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
         {sitters.filter(s=>!s.prn).map(s=>(
           <span key={s.id} style={{fontSize:10,background:s.color.bg,color:"#fff",
             borderRadius:4,padding:"2px 7px",fontWeight:600}}>{shortName(s.name)}</span>
         ))}
         <span style={{fontSize:10,background:"#ef4444",color:"#fff",borderRadius:4,padding:"2px 7px",fontWeight:600}}>🔴 Unmatched</span>
+        <span style={{fontSize:10,background:"#fbbf24",color:"#fff",borderRadius:4,padding:"2px 7px",fontWeight:600}}>⚠️ At cap</span>
+      </div>
+      {/* Zone legend */}
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+        {Object.values(ZONES).map(z=>(
+          <span key={z.label} style={{fontSize:10,background:z.color,color:"#fff",
+            borderRadius:4,padding:"2px 7px",fontWeight:600}}>{z.label}</span>
+        ))}
       </div>
 
       {/* Day-of-week header */}
@@ -513,7 +600,6 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:2}}>
                 {dayJobs.slice(0,view==="month"?3:6).map(j=>{
-                  const unmatched=!j.assignedTo&&!j.prnStatus?.status==="confirmed";
                   const confirmed=j.prnStatus?.status==="confirmed";
                   const bg=j.assignedTo?j.assignedTo.color.bg:confirmed?"#7c3aed":"#ef4444";
                   return(
@@ -522,8 +608,10 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
                       style={{background:bg,color:"#fff",borderRadius:3,
                         padding:"1px 4px",fontSize:9,fontWeight:600,
                         cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",
-                        textOverflow:"ellipsis",lineHeight:1.4}}>
-                      {j.assignedTo?shortName(j.assignedTo.name):"🔴"} {j.client}
+                        textOverflow:"ellipsis",lineHeight:1.4,
+                        outline:j.overCap?"2px solid #fbbf24":"none",
+                        outlineOffset:"1px"}}>
+                      {j.assignedTo?shortName(j.assignedTo.name):"🔴"} {j.client}{j.overCap?" ⚠️":""}
                     </div>
                   );
                 })}
@@ -556,6 +644,7 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
                   <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{fmtDate(j.date)}</div>
                   <div style={{marginTop:4,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                     <BlockBadge blockKey={j.blockKey}/>
+                    {j.jobZip&&<ZoneBadge zone={getJobZone(j.jobZip)}/>}
                     {j.jobZip&&<span style={{fontSize:11,color:"#6b7280"}}>📍 {j.jobZip}</span>}
                   </div>
                   {j.service&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{j.service}</div>}
@@ -567,8 +656,17 @@ function CalendarPanel({jobs,sitters,setJobs,timeOffMap,refDate,setRefDate}){
               {liveJob.assignedTo?(
                 <div style={{background:liveJob.assignedTo.color.light,border:`1px solid ${liveJob.assignedTo.color.bg}40`,
                   borderRadius:8,padding:"8px 12px",marginBottom:8}}>
-                  <div style={{fontSize:12,color:"#374151"}}>Assigned to:</div>
+                  <div style={{fontSize:11,color:"#374151",marginBottom:2}}>Assigned to:</div>
                   <div style={{fontWeight:700,fontSize:15,color:liveJob.assignedTo.color.bg}}>{liveJob.assignedTo.name}</div>
+                  <div style={{fontSize:11,color:"#6b7280",marginTop:2,display:"flex",gap:6,flexWrap:"wrap"}}>
+                    <span>Primary: {liveJob.assignedTo.primaryZone}</span>
+                    {liveJob.overCap&&<span style={{color:"#d97706",fontWeight:700}}>⚠️ At cap ({MAX_JOBS_PER_BLOCK} jobs)</span>}
+                  </div>
+                  {liveJob.overCap&&liveJob.alternative&&(
+                    <div style={{marginTop:6,background:"#fef9c3",borderRadius:5,padding:"4px 8px",fontSize:11,color:"#92400e"}}>
+                      💡 Alternative: <strong>{liveJob.alternative.name}</strong> ({liveJob.alternative.primaryZone})
+                    </div>
+                  )}
                 </div>
               ):(
                 <div style={{background:"#fff1f1",border:"1px solid #fca5a5",borderRadius:8,
@@ -687,24 +785,45 @@ function SummaryPanel({jobs,sitters}){
                 </button>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                {group.jobs.map(j=>(
-                  <div key={j.id} style={{display:"flex",alignItems:"center",gap:10,
-                    background:j.assignedTo?j.assignedTo.color.light:"#fff1f1",
-                    borderRadius:8,padding:"8px 10px"}}>
-                    <span style={{
-                      background:j.assignedTo?j.assignedTo.color.bg:"#ef4444",color:"#fff",
-                      borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700,flexShrink:0,minWidth:60,textAlign:"center"}}>
-                      {j.assignedTo?shortName(j.assignedTo.name):"🔴 OPEN"}
-                    </span>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:13}}>{j.client}</div>
-                      <div style={{fontSize:11,color:"#6b7280",display:"flex",gap:6,alignItems:"center",marginTop:1,flexWrap:"wrap"}}>
-                        {j.jobZip&&<span>📍 {j.jobZip}</span>}
-                        {j.service&&<span>{j.service}</span>}
+                {group.jobs.map(j=>{
+                  const jobZone=getJobZone(j.jobZip);
+                  return(
+                  <div key={j.id} style={{
+                    background:j.overCap?"#fffbeb":j.assignedTo?j.assignedTo.color.light:"#fff1f1",
+                    borderRadius:8,padding:"8px 10px",
+                    border:j.overCap?"1px solid #fbbf24":"none"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{
+                        background:j.assignedTo?j.assignedTo.color.bg:"#ef4444",color:"#fff",
+                        borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700,
+                        flexShrink:0,minWidth:60,textAlign:"center"}}>
+                        {j.assignedTo?shortName(j.assignedTo.name):"🔴 OPEN"}
+                      </span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:13}}>{j.client}</div>
+                        <div style={{fontSize:11,color:"#6b7280",display:"flex",gap:5,alignItems:"center",marginTop:1,flexWrap:"wrap"}}>
+                          {j.jobZip&&<span>📍 {j.jobZip}</span>}
+                          {jobZone&&<ZoneBadge zone={jobZone} small/>}
+                          {j.service&&<span style={{color:"#9ca3af"}}>{j.service}</span>}
+                        </div>
                       </div>
+                      {j.overCap&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",
+                        borderRadius:4,padding:"1px 5px",fontWeight:700,whiteSpace:"nowrap"}}>⚠️ At cap</span>}
                     </div>
+                    {/* Alternative sitter suggestion when at cap */}
+                    {j.overCap&&j.alternative&&(
+                      <div style={{marginTop:5,fontSize:11,color:"#92400e",
+                        background:"#fef9c3",borderRadius:5,padding:"3px 8px",display:"flex",gap:6,alignItems:"center"}}>
+                        <span>Alternative:</span>
+                        <span style={{fontWeight:700,color:j.alternative.color.bg}}>
+                          {j.alternative.name}
+                        </span>
+                        <span style={{color:"#9ca3af"}}>({j.alternative.primaryZone})</span>
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
