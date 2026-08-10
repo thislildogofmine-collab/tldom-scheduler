@@ -275,6 +275,8 @@ function timeOffRowsToMap(rows){
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTO-MATCH ENGINE
+// Jobs already assigned to a real sitter in TTP pass straight through.
+// Only unassigned jobs (Staff = "TLDOM Admin" or not in roster) get matched.
 // ─────────────────────────────────────────────────────────────────────────────
 function autoMatch(jobs,sitters,timeOffMap){
   const regular=sitters.filter(s=>!s.prn);
@@ -285,7 +287,24 @@ function autoMatch(jobs,sitters,timeOffMap){
     blockCounts[k]=(blockCounts[k]||0)+1;
   };
 
+  // Pre-count already-assigned jobs so even distribution stays accurate
+  jobs.forEach(job=>{
+    const existing=regular.find(s=>
+      s.name.toLowerCase()===job.staffFull.toLowerCase()
+    );
+    if(existing)ic(existing.id,job.date,job.blockKey);
+  });
+
   return jobs.map(job=>{
+    // ── Already assigned to a real sitter in TTP ──────────────────────────
+    const existing=regular.find(s=>
+      s.name.toLowerCase()===job.staffFull.toLowerCase()
+    );
+    if(existing){
+      return{...job,assignedTo:existing,alternative:null,overCap:false,prnStatus:null,fromTTP:true};
+    }
+
+    // ── Unassigned (TLDOM Admin or unknown staff) — run match engine ──────
     const timeOffs=name=>timeOffMap[name]||[];
 
     // 1. Filter: sitter has availability covering this job's start time
@@ -498,6 +517,7 @@ function ImportPanel({onImport}){
         </div>
         <div style={{fontSize:12,color:"#4c1d95",lineHeight:1.8}}>
           ✅ Availability CSV = when sitters CAN work (submitted via TTP)<br/>
+          📋 Jobs already assigned in TTP pass straight through<br/>
           🗺 Jobs auto-assigned by zone → even distribution → 5-job cap<br/>
           🔴 Unmatched jobs surface PRN backup team<br/>
           📍 Dispatch map shows all routes for any day
@@ -959,6 +979,10 @@ function SummaryPanel({jobs,sitters}){
                         {j.overCap&&(
                           <span style={{fontSize:10,background:"#fef3c7",color:"#92400e",
                             borderRadius:4,padding:"1px 5px",fontWeight:700}}>⚠️ At cap</span>
+                        )}
+                        {j.fromTTP&&(
+                          <span style={{fontSize:10,background:"#dbeafe",color:"#1e40af",
+                            borderRadius:4,padding:"1px 5px",fontWeight:700}}>TTP ✓</span>
                         )}
                       </div>
                       {j.overCap&&j.alternative&&(
