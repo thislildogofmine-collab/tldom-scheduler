@@ -60,10 +60,6 @@ const BLOCK_MAP={
   "Evening Time Block 5pm - 8pm":"evening",
   "Overnight time block 6pm - 8am":"overnight",
 };
-// Block hours for availability check [startH, endH]
-const BLOCK_HOURS={
-  morning:[7,10],midday:[11,15],evening:[17,20],overnight:[18,32],
-};
 const BLOCKS=[
   {key:"morning",  label:"Morning",  sub:"7–10am",  color:"#F59E0B",light:"#fffbeb"},
   {key:"midday",   label:"Mid-day",  sub:"11am–3pm",color:"#3B82F6",light:"#eff6ff"},
@@ -137,26 +133,23 @@ function parseWallClock(iso){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AVAILABILITY CHECK  (FLIPPED — CSV = when they CAN work)
-// A sitter is available for a block if ANY availability window on that date
-// overlaps with the block hours (partial overlap counts).
-// If no availability entries exist for that date → NOT available.
+// AVAILABILITY CHECK
+// Time Off CSV = when sitters CANNOT work.
+// Job start time (from Service Time column) is checked against time-off windows.
+// If job start time falls within any time-off window → sitter is blocked.
 // ─────────────────────────────────────────────────────────────────────────────
-function isSitterAvailable(dateStr, blockKey, availWindows){
-  if(!availWindows||availWindows.length===0)return false;
-  const[bS,bE]=BLOCK_HOURS[blockKey]||[0,0];
-  const base=new Date(dateStr+"T00:00:00");
-  const bs=new Date(base);bs.setHours(bS,0,0,0);
-  const be=new Date(base);
-  if(bE>24){be.setDate(be.getDate()+1);be.setHours(bE-24,0,0,0);}
-  else be.setHours(bE,0,0,0);
-
-  return availWindows.some(w=>{
-    const s=parseWallClock(w.startISO);
-    const e=parseWallClock(w.endISO);
+function isJobConflict(jobStartMinutes, dateStr, timeOffs){
+  // jobStartMinutes: minutes since midnight (e.g. 7:00 AM = 420)
+  if(jobStartMinutes===null||jobStartMinutes===undefined)return false;
+  return timeOffs.some(to=>{
+    const s=parseWallClock(to.startISO);
+    const e=parseWallClock(to.endISO);
     if(!s||!e)return false;
-    // Partial overlap: avail window starts before block ends AND ends after block starts
-    return s<be&&e>bs;
+    // Convert time-off to minutes since midnight on job date
+    const base=new Date(dateStr+"T00:00:00");
+    const sMin=(s-base)/60000; // ms to minutes
+    const eMin=(e-base)/60000;
+    return jobStartMinutes>=sMin&&jobStartMinutes<eMin;
   });
 }
 
@@ -210,6 +203,17 @@ function parseCSV(text){
   return rows;
 }
 
+function parseServiceStartMins(serviceTime){
+  // "Wednesday, June 3, 2026 7:00 PM - 7:30 PM" → 1140
+  if(!serviceTime)return null;
+  const m=serviceTime.match(/\d{4}\s+(\d{1,2}):(\d{2})\s+([AP]M)/);
+  if(!m)return null;
+  let h=parseInt(m[1]),mn=parseInt(m[2]);
+  if(m[3]==="PM"&&h!==12)h+=12;
+  if(m[3]==="AM"&&h===12)h=0;
+  return h*60+mn;
+}
+
 function scheduleRowsToJobs(rows){
   return rows.map((r,i)=>{
     const blockKey=BLOCK_MAP[(r["Client Time Display"]||"").trim()]||null;
@@ -219,29 +223,28 @@ function scheduleRowsToJobs(rows){
     const datePart=serviceTime.split(" ").slice(1,4).join(" ");
     const dateObj=new Date(datePart+" 12:00:00");
     const isoDate=isNaN(dateObj)?"":dateObj.toISOString().split("T")[0];
+    const startMins=parseServiceStartMins(serviceTime);
     return{
       id:i+1,staffFull:r["Staff"]||"",
       client:clientInfo.split(",")[0].trim(),
-      date:isoDate,blockKey,jobZip,
+      date:isoDate,blockKey,jobZip,startMins,
       service:r["Service"]||"",
       assignedTo:null,alternative:null,overCap:false,prnStatus:null,
     };
   }).filter(j=>j.date&&j.blockKey);
 }
 
-// Availability map: staffName → [{startISO, endISO, date}]
-function availRowsToMap(rows){
+// Time-off map: staffName → [{startISO, endISO}]
+// These are when sitters CANNOT work (standard TTP time-off format)
+function timeOffRowsToMap(rows){
   const map={};
   rows.forEach(r=>{
     const staff=r["Staff"]||"";
     const startISO=r["Start (Sortable)"]||"";
     const endISO=r["End (Sortable)"]||"";
     if(!staff||!startISO)return;
-    // Extract the date from the ISO string
-    const dateStr=startISO.substring(0,10);
-    if(!map[staff])map[staff]={};
-    if(!map[staff][dateStr])map[staff][dateStr]=[];
-    map[staff][dateStr].push({startISO,endISO});
+    if(!map[staff])map[staff]=[];
+    map[staff].push({startISO,endISO,type:r["Type"]||""});
   });
   return map;
 }
@@ -249,7 +252,7 @@ function availRowsToMap(rows){
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTO-MATCH ENGINE
 // ─────────────────────────────────────────────────────────────────────────────
-function autoMatch(jobs,sitters,availMap){
+function autoMatch(jobs,sitters,timeOffMap){
   const regular=sitters.filter(s=>!s.prn);
   const blockCounts={};
   const gc=(sid,date,bk)=>blockCounts[`${sid}-${date}-${bk}`]||0;
@@ -260,11 +263,11 @@ function autoMatch(jobs,sitters,availMap){
 
   return jobs.map(job=>{
     const jobZone=getJobZone(job.jobZip);
-    const dayAvail=name=>(availMap[name]||{})[job.date]||[];
+    const timeOffs=name=>timeOffMap[name]||[];
 
-    // 1. Filter by availability on this date+block
+    // 1. Filter: sitter not on time-off during this job's start time
     const available=regular.filter(s=>
-      isSitterAvailable(job.date,job.blockKey,dayAvail(s.name))
+      !isJobConflict(job.startMins,job.date,timeOffs(s.name))
     );
     if(available.length===0)
       return{...job,assignedTo:null,alternative:null,overCap:false,prnStatus:null};
@@ -421,9 +424,9 @@ const mBtn={border:"none",borderRadius:5,padding:"3px 8px",fontSize:11,fontWeigh
 // IMPORT PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 function ImportPanel({onImport}){
-  const schedRef=useRef(),availRef=useRef();
+  const schedRef=useRef(),toRef=useRef();
   const[schedOK,setSchedOK]=useState(false);
-  const[availOK,setAvailOK]=useState(false);
+  const[toOK,setToOK]=useState(false);
   const[msg,setMsg]=useState("");
 
   function readFile(file,cb){
@@ -434,16 +437,16 @@ function ImportPanel({onImport}){
     readFile(f,text=>{
       const jobs=scheduleRowsToJobs(parseCSV(text));
       onImport("jobs",jobs);setSchedOK(true);
-      setMsg(m=>`✅ ${jobs.length} jobs loaded`+(m.includes("availability")?" · "+m.split(" · ")[1]:""));
+      setMsg(m=>`✅ ${jobs.length} jobs loaded`+(m.includes("time-off")?" · "+m.split(" · ")[1]:""));
     });
   }
-  function handleAvail(e){
+  function handleTO(e){
     const f=e.target.files[0];if(!f)return;
     readFile(f,text=>{
-      const map=availRowsToMap(parseCSV(text));
-      onImport("avail",map);setAvailOK(true);
+      const map=timeOffRowsToMap(parseCSV(text));
+      onImport("timeoff",map);setToOK(true);
       setMsg(m=>(m.includes("jobs")?m.split(" · ")[0]+" · ":"")+
-        `✅ Availability for ${Object.keys(map).length} staff`);
+        `✅ Time-off loaded for ${Object.keys(map).length} staff`);
     });
   }
 
@@ -462,12 +465,12 @@ function ImportPanel({onImport}){
           </div>
           <input type="file" accept=".csv" ref={schedRef} onChange={handleSched} style={{fontSize:13}}/>
         </div>
-        <div style={{...styles.card,borderLeft:availOK?"4px solid #22c55e":"4px solid #e5e7eb"}}>
+        <div style={{...styles.card,borderLeft:toOK?"4px solid #22c55e":"4px solid #e5e7eb"}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>
-            {availOK?"✅":"2."} Availability CSV
-            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Time → Time Off)</span>
+            {toOK?"✅":"2."} Time Off CSV
+            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Time → Time Off — sitter unavailability)</span>
           </div>
-          <input type="file" accept=".csv" ref={availRef} onChange={handleAvail} style={{fontSize:13}}/>
+          <input type="file" accept=".csv" ref={toRef} onChange={handleTO} style={{fontSize:13}}/>
         </div>
       </div>
       {msg&&(
@@ -481,7 +484,7 @@ function ImportPanel({onImport}){
           HOW IT WORKS
         </div>
         <div style={{fontSize:12,color:"#4c1d95",lineHeight:1.8}}>
-          ✅ Availability CSV = when sitters CAN work<br/>
+          🚫 Time Off CSV = when sitters CANNOT work (from TTP)<br/>
           🗺 Jobs auto-assigned by zone → even distribution → 5-job cap<br/>
           🔴 Unmatched jobs surface PRN backup team<br/>
           📍 Dispatch map shows all routes for any day
@@ -494,7 +497,7 @@ function ImportPanel({onImport}){
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPATCH MAP  (Leaflet + OpenStreetMap, no API key)
 // ─────────────────────────────────────────────────────────────────────────────
-function DispatchMap({jobs,sitters,availMap}){
+function DispatchMap({jobs,sitters,timeOffMap}){
   const mapRef=useRef(null);
   const leafletRef=useRef(null);
   const[selectedDate,setSelectedDate]=useState(null);
@@ -1024,7 +1027,7 @@ function SummaryPanel({jobs,sitters}){
 // ─────────────────────────────────────────────────────────────────────────────
 // MARKETING FILL
 // ─────────────────────────────────────────────────────────────────────────────
-function MarketingFill({jobs,sitters,availMap}){
+function MarketingFill({jobs,sitters,timeOffMap}){
   const[taskSeed,setTaskSeed]=useState(0);
   const gaps=useMemo(()=>{
     const dates=[...new Set(jobs.map(j=>j.date))].sort();
@@ -1032,15 +1035,19 @@ function MarketingFill({jobs,sitters,availMap}){
     dates.forEach(date=>{
       sitters.filter(s=>!s.prn).forEach(s=>{
         BLOCKS.forEach(b=>{
-          const avail=(availMap[s.name]||{})[date]||[];
-          if(!isSitterAvailable(date,b.key,avail))return;
+          // For marketing fill, check if sitter has any time-off on this date
+          // covering this block — if not, they're free
+          const toEntries=timeOffMap[s.name]||[];
+          const blockMidMins={morning:8*60,midday:12*60,evening:18*60,overnight:21*60};
+          const midMins=blockMidMins[b.key]||0;
+          if(isJobConflict(midMins,date,toEntries))return;
           const hasJob=jobs.some(j=>j.assignedTo?.id===s.id&&j.date===date&&j.blockKey===b.key);
           if(!hasJob)result.push({sitter:s,date,block:b});
         });
       });
     });
     return result;
-  },[jobs,sitters,availMap]);
+  },[jobs,sitters,timeOffMap]);
 
   return(
     <div>
@@ -1101,18 +1108,17 @@ export default function App(){
   const[tab,setTab]=useState(0);
   const[sitters]=useState(initSitters);
   const[jobs,setJobs]=useState([]);
-  const[availMap,setAvailMap]=useState({});
+  const[timeOffMap,setTimeOffMap]=useState({});
 
   const handleImport=useCallback((type,data)=>{
     if(type==="jobs"){
       setJobs(prev=>{
-        const matched=autoMatch(data,sitters,availMap);
+        const matched=autoMatch(data,sitters,timeOffMap);
         return matched;
       });
     }
-    if(type==="avail"){
-      setAvailMap(data);
-      // Re-match existing jobs with new availability
+    if(type==="timeoff"){
+      setTimeOffMap(data);
       setJobs(prev=>{
         if(prev.length===0)return prev;
         return autoMatch(
@@ -1121,7 +1127,7 @@ export default function App(){
         );
       });
     }
-  },[sitters,availMap]);
+  },[sitters,timeOffMap]);
 
   const assignedCount=jobs.filter(j=>j.assignedTo).length;
   const openCount=jobs.filter(j=>!j.assignedTo).length;
@@ -1174,9 +1180,9 @@ export default function App(){
 
       <div style={styles.content}>
         {tab===0&&<ImportPanel onImport={handleImport}/>}
-        {tab===1&&<DispatchMap jobs={jobs} sitters={sitters} availMap={availMap}/>}
+        {tab===1&&<DispatchMap jobs={jobs} sitters={sitters} timeOffMap={timeOffMap}/>}
         {tab===2&&<SummaryPanel jobs={jobs} sitters={sitters}/>}
-        {tab===3&&<MarketingFill jobs={jobs} sitters={sitters} availMap={availMap}/>}
+        {tab===3&&<MarketingFill jobs={jobs} sitters={sitters} timeOffMap={timeOffMap}/>}
       </div>
     </div>
   );
