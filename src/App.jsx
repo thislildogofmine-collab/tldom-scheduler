@@ -571,9 +571,81 @@ function DispatchMap({jobs,sitters,timeOffMap}){
     const map=mapRef.current?._map;
     if(!L||!map)return;
 
-    // Clear existing layers
-    map.eachLayer(l=>{if(l instanceof L.Polyline||l instanceof L.Marker||l instanceof L.CircleMarker)map.removeLayer(l);});
+    // Clear existing layers except tile layer
+    map.eachLayer(l=>{
+      if(l instanceof L.Polyline||l instanceof L.Marker||
+         l instanceof L.CircleMarker||l instanceof L.Polygon)
+        map.removeLayer(l);
+    });
 
+    // ── Zone boundary polygons ──────────────────────────────────────────────
+    const ZONE_POLYS={
+      "Zone 1":[[30.3874,-97.7115],[30.4082,-97.7531],[30.4394,-97.778],[30.4591,-97.7572],[30.4192,-97.7078],[30.3874,-97.7115]],
+      "Zone 2":[[30.366,-97.6632],[30.3776,-97.6792],[30.5012,-97.5729],[30.3949,-97.531],[30.366,-97.6632]],
+      "Zone 3":[[30.2655,-97.6853],[30.3187,-97.7373],[30.3499,-97.7581],[30.3499,-97.7373],[30.3395,-97.7061],[30.3071,-97.6957],[30.2655,-97.6853]],
+      "Zone 4":[[30.2069,-97.7869],[30.2277,-97.8389],[30.2702,-97.8493],[30.2993,-97.8077],[30.2901,-97.7557],[30.2459,-97.6287],[30.2069,-97.7869]],
+    };
+    const ZONE_COLORS={
+      "Zone 1":"#0891b2","Zone 2":"#7c3aed",
+      "Zone 3":"#059669","Zone 4":"#dc2626",
+    };
+    Object.entries(ZONE_POLYS).forEach(([name,coords])=>{
+      const color=ZONE_COLORS[name]||"#666";
+      L.polygon(coords,{
+        color,weight:2,opacity:0.7,
+        fillColor:color,fillOpacity:0.06,
+        dashArray:"5,5",
+      }).addTo(map)
+        .bindTooltip(`<strong>${name}</strong>`,{permanent:false,direction:"center"});
+    });
+
+    // ── Job location pins (all jobs for this day) ───────────────────────────
+    // Group jobs by zip so we can offset pins that stack on the same location
+    const jobsByZip={};
+    dayJobs.forEach(j=>{
+      const zip=j.jobZip;
+      const coords=zip?ZIP_COORDS[zip]:null;
+      if(!coords)return;
+      if(!jobsByZip[zip])jobsByZip[zip]=[];
+      jobsByZip[zip].push(j);
+    });
+
+    Object.entries(jobsByZip).forEach(([zip,zjobs])=>{
+      const base=ZIP_COORDS[zip];
+      zjobs.forEach((j,idx)=>{
+        // Slight offset so stacked jobs don't hide each other
+        const angle=(idx/zjobs.length)*2*Math.PI;
+        const offset=zjobs.length>1?0.002:0;
+        const lat=base[0]+offset*Math.sin(angle);
+        const lng=base[1]+offset*Math.cos(angle);
+        const block=BLOCKS.find(b=>b.key===j.blockKey);
+        const isAssigned=!!j.assignedTo;
+        const pinColor=isAssigned?j.assignedTo.color.bg:"#ef4444";
+        const icon=L.divIcon({
+          html:`<div style="
+            background:${pinColor};color:#fff;
+            border-radius:50% 50% 50% 0;
+            width:20px;height:20px;
+            transform:rotate(-45deg);
+            border:2px solid #fff;
+            box-shadow:0 1px 4px rgba(0,0,0,.35);
+          "></div>`,
+          iconSize:[20,20],iconAnchor:[10,20],className:"",
+        });
+        L.marker([lat,lng],{icon})
+          .addTo(map)
+          .bindPopup(`
+            <strong style="font-size:13px">${j.client}</strong><br/>
+            <span style="color:${pinColor};font-weight:700">
+              ${isAssigned?j.assignedTo.name:"🔴 Unmatched"}
+            </span><br/>
+            <span style="color:#666">${block?.label||""} · ${j.service||""}</span>
+            ${zip?`<br/><span style="color:#999">📍 ${zip}</span>`:""}
+          `);
+      });
+    });
+
+    // ── Sitter routes ───────────────────────────────────────────────────────
     routes.forEach(r=>{
       if(hiddenSitters.has(r.sitter.id))return;
       const color=r.sitter.color.bg;
@@ -590,7 +662,7 @@ function DispatchMap({jobs,sitters,timeOffMap}){
           .bindPopup(`<strong>${r.sitter.name}</strong><br/>Home base`);
       }
 
-      // Build full route coords: home → stops → home
+      // Build route coords: home → stops → home
       const allCoords=[];
       if(homeCoords)allCoords.push(homeCoords);
 
@@ -598,43 +670,27 @@ function DispatchMap({jobs,sitters,timeOffMap}){
         const c=ZIP_COORDS[j.jobZip];
         if(!c)return;
         allCoords.push(c);
-
-        // Numbered stop marker
+        // Numbered route stop marker
         const icon=L.divIcon({
-          html:`<div style="background:${color};color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer">${i+1}</div>`,
+          html:`<div style="background:${color};color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${i+1}</div>`,
           iconSize:[26,26],iconAnchor:[13,13],className:"",
         });
-        L.marker(c,{icon:icon})
+        L.marker(c,{icon})
           .addTo(map)
           .bindPopup(`
             <strong>${j.client}</strong><br/>
             <span style="color:${color};font-weight:700">${r.sitter.name}</span><br/>
-            ${BLOCKS.find(b=>b.key===j.blockKey)?.label||""} · ${j.jobZip||""}<br/>
+            ${BLOCKS.find(b=>b.key===j.blockKey)?.label||""}<br/>
             Stop ${i+1} of ${r.jobs.length}
           `);
       });
 
       if(homeCoords)allCoords.push(homeCoords);
 
-      // Draw route line
+      // Route line
       if(allCoords.length>1){
-        L.polyline(allCoords,{
-          color,weight:3,opacity:0.75,dashArray:"6,4",
-        }).addTo(map);
+        L.polyline(allCoords,{color,weight:3,opacity:0.8,dashArray:"6,4"}).addTo(map);
       }
-    });
-
-    // Unmatched job markers
-    dayJobs.filter(j=>!j.assignedTo).forEach(j=>{
-      const c=ZIP_COORDS[j.jobZip];
-      if(!c)return;
-      const icon=L.divIcon({
-        html:`<div style="background:#ef4444;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">!</div>`,
-        iconSize:[22,22],iconAnchor:[11,11],className:"",
-      });
-      L.marker(c,{icon:icon})
-        .addTo(map)
-        .bindPopup(`<strong>${j.client}</strong><br/><span style="color:#ef4444;font-weight:700">🔴 Unmatched</span><br/>${j.jobZip||""}`);
     });
 
   },[routes,hiddenSitters,activeDate,dayJobs]);
