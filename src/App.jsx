@@ -78,12 +78,9 @@ const MAX_JOBS_PER_BLOCK=5;
 // ROSTER  — names must match TTP exactly
 // ─────────────────────────────────────────────────────────────────────────────
 const REGULAR_ROSTER=[
-  {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Blvd, Austin, TX 78735",        primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Nicholas Romano",  zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",            primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Jonathan Tarbay",  zip:"78634",address:"1001 McCormick Cv, Hutto, TX 78634",         primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
-  {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
   {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660",     primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
-  {name:"Christine Keith",  zip:"78731",address:"4201 N Hills Dr, Austin, TX 78731",          primaryZone:"Zone 3",adjacentZones:["Zone 1","Zone 2","Zone 4"]},
   {name:"Mark Carter",      zip:"78702",address:"3114 E 12th St, Austin, TX 78702",           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",            primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Holly Slagle",     zip:"78735",address:"Austin, TX 78735",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
