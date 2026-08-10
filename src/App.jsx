@@ -130,23 +130,28 @@ function parseWallClock(iso){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AVAILABILITY CHECK
-// Time Off CSV = when sitters CANNOT work.
-// Job start time (from Service Time column) is checked against time-off windows.
-// If job start time falls within any time-off window → sitter is blocked.
+// AVAILABILITY CHECK — Time Off CSV = when sitters CAN work
+// A sitter is available for a job if they have ANY availability window on that
+// date that overlaps with the job's start time (partial overlap counts).
+// If no entry exists for that date → NOT available.
 // ─────────────────────────────────────────────────────────────────────────────
-function isJobConflict(jobStartMinutes, dateStr, timeOffs){
-  // jobStartMinutes: minutes since midnight (e.g. 7:00 AM = 420)
-  if(jobStartMinutes===null||jobStartMinutes===undefined)return false;
-  return timeOffs.some(to=>{
+function isSitterAvailable(dateStr, startMins, timeOffs){
+  if(!timeOffs||timeOffs.length===0)return false;
+  if(startMins===null||startMins===undefined)return false;
+  // Filter to entries on this date
+  const dayEntries=timeOffs.filter(to=>
+    to.startISO&&to.startISO.substring(0,10)===dateStr
+  );
+  if(dayEntries.length===0)return false;
+  return dayEntries.some(to=>{
     const s=parseWallClock(to.startISO);
     const e=parseWallClock(to.endISO);
     if(!s||!e)return false;
-    // Convert time-off to minutes since midnight on job date
     const base=new Date(dateStr+"T00:00:00");
-    const sMin=(s-base)/60000; // ms to minutes
+    const sMin=(s-base)/60000;
     const eMin=(e-base)/60000;
-    return jobStartMinutes>=sMin&&jobStartMinutes<eMin;
+    // Job start time falls within availability window
+    return startMins>=sMin&&startMins<eMin;
   });
 }
 
@@ -253,8 +258,8 @@ function scheduleRowsToJobs(rows){
   }).filter(j=>j.date&&j.blockKey);
 }
 
-// Time-off map: staffName → [{startISO, endISO}]
-// These are when sitters CANNOT work (standard TTP time-off format)
+// Availability map: staffName → [{startISO, endISO, type}]
+// These are when sitters CAN work (TTP "time off" = submitted availability)
 function timeOffRowsToMap(rows){
   const map={};
   rows.forEach(r=>{
@@ -283,9 +288,9 @@ function autoMatch(jobs,sitters,timeOffMap){
   return jobs.map(job=>{
     const timeOffs=name=>timeOffMap[name]||[];
 
-    // 1. Filter: sitter not on time-off during this job's start time
+    // 1. Filter: sitter has availability covering this job's start time
     const available=regular.filter(s=>
-      !isJobConflict(job.startMins,job.date,timeOffs(s.name))
+      isSitterAvailable(job.date,job.startMins,timeOffs(s.name))
     );
     if(available.length===0)
       return{...job,assignedTo:null,alternative:null,overCap:false,prnStatus:null};
@@ -475,8 +480,8 @@ function ImportPanel({onImport}){
         </div>
         <div style={{...styles.card,borderLeft:toOK?"4px solid #22c55e":"4px solid #e5e7eb"}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>
-            {toOK?"✅":"2."} Time Off CSV
-            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Time → Time Off — sitter unavailability)</span>
+            {toOK?"✅":"2."} Availability CSV
+            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Time → Time Off — when sitters CAN work)</span>
           </div>
           <input type="file" accept=".csv" ref={toRef} onChange={handleTO} style={{fontSize:13}}/>
         </div>
@@ -492,7 +497,7 @@ function ImportPanel({onImport}){
           HOW IT WORKS
         </div>
         <div style={{fontSize:12,color:"#4c1d95",lineHeight:1.8}}>
-          🚫 Time Off CSV = when sitters CANNOT work (from TTP)<br/>
+          ✅ Availability CSV = when sitters CAN work (submitted via TTP)<br/>
           🗺 Jobs auto-assigned by zone → even distribution → 5-job cap<br/>
           🔴 Unmatched jobs surface PRN backup team<br/>
           📍 Dispatch map shows all routes for any day
@@ -1048,7 +1053,7 @@ function MarketingFill({jobs,sitters,timeOffMap}){
           const toEntries=timeOffMap[s.name]||[];
           const blockMidMins={morning:8*60,midday:12*60,evening:18*60,overnight:21*60};
           const midMins=blockMidMins[b.key]||0;
-          if(isJobConflict(midMins,date,toEntries))return;
+          if(!isSitterAvailable(date,midMins,toEntries))return;
           const hasJob=jobs.some(j=>j.assignedTo?.id===s.id&&j.date===date&&j.blockKey===b.key);
           if(!hasJob)result.push({sitter:s,date,block:b});
         });
