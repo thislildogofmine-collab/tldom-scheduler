@@ -200,32 +200,54 @@ function parseCSV(text){
   return rows;
 }
 
-function parseServiceStartMins(serviceTime){
-  // "Wednesday, June 3, 2026 7:00 PM - 7:30 PM" → 1140
-  if(!serviceTime)return null;
-  const m=serviceTime.match(/\d{4}\s+(\d{1,2}):(\d{2})\s+([AP]M)/);
-  if(!m)return null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Parse start time from "Aug 10, 2026 8:30 AM" → block key + minutes
+// Block ranges: Morning 7–10:30am, Mid-day 11am–3pm, Evening 5–8pm, Overnight 6pm–8am
+// ─────────────────────────────────────────────────────────────────────────────
+function parseStartToBlock(startStr){
+  if(!startStr)return{blockKey:null,startMins:null};
+  const m=startStr.match(/(\d{1,2}):(\d{2})\s+([AP]M)/);
+  if(!m)return{blockKey:null,startMins:null};
   let h=parseInt(m[1]),mn=parseInt(m[2]);
   if(m[3]==="PM"&&h!==12)h+=12;
   if(m[3]==="AM"&&h===12)h=0;
-  return h*60+mn;
+  const mins=h*60+mn;
+  let blockKey=null;
+  if(mins>=7*60&&mins<10*60+30)  blockKey="morning";   // 7:00am–10:29am
+  else if(mins>=11*60&&mins<15*60) blockKey="midday";  // 11:00am–2:59pm
+  else if(mins>=17*60&&mins<20*60) blockKey="evening"; // 5:00pm–7:59pm
+  else if(mins>=18*60||mins<7*60)  blockKey="overnight";
+  return{blockKey,startMins:mins};
+}
+
+function parseStartDate(startStr){
+  // "Aug 10, 2026 8:30 AM" → "2026-08-10"
+  if(!startStr)return"";
+  const m=startStr.match(/^([A-Za-z]+ \d{1,2}, \d{4})/);
+  if(!m)return"";
+  const d=new Date(m[1]+" 12:00:00");
+  return isNaN(d)?"":d.toISOString().split("T")[0];
 }
 
 function scheduleRowsToJobs(rows){
   return rows.map((r,i)=>{
-    const blockKey=BLOCK_MAP[(r["Client Time Display"]||"").trim()]||null;
-    const clientInfo=r["Client Info"]||"";
-    const jobZip=extractJobZip(clientInfo);
-    const serviceTime=r["Service Time"]||"";
-    const datePart=serviceTime.split(" ").slice(1,4).join(" ");
-    const dateObj=new Date(datePart+" 12:00:00");
-    const isoDate=isNaN(dateObj)?"":dateObj.toISOString().split("T")[0];
-    const startMins=parseServiceStartMins(serviceTime);
+    const{blockKey,startMins}=parseStartToBlock(r["Start"]||"");
+    const isoDate=parseStartDate(r["Start"]||"");
+    // Client field: "Ben Taylor (Ivan, Catie)" → "Ben Taylor"
+    const clientRaw=(r["Client"]||"").trim();
+    const client=clientRaw.replace(/\s*\(.*\)$/,"").trim()||clientRaw;
+    const staffFull=(r["Staff"]||"").trim();
     return{
-      id:i+1,staffFull:r["Staff"]||"",
-      client:clientInfo.split(",")[0].trim(),
-      date:isoDate,blockKey,jobZip,startMins,
-      service:r["Service"]||"",
+      id:i+1,
+      staffFull,
+      client,
+      clientRaw,
+      date:isoDate,
+      blockKey,
+      startMins,
+      jobZip:null, // new format doesn't include zip — zone badges hidden
+      service:(r["Service"]||"").trim(),
+      status:(r["Status"]||"").trim(),
       assignedTo:null,alternative:null,overCap:false,prnStatus:null,
     };
   }).filter(j=>j.date&&j.blockKey);
@@ -447,7 +469,7 @@ function ImportPanel({onImport}){
         <div style={{...styles.card,borderLeft:schedOK?"4px solid #22c55e":"4px solid #e5e7eb"}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>
             {schedOK?"✅":"1."} Schedule CSV
-            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Schedule → Visits)</span>
+            <span style={{fontWeight:400,color:"#6b7280",fontSize:11}}> (Reporting → Visits — new format)</span>
           </div>
           <input type="file" accept=".csv" ref={schedRef} onChange={handleSched} style={{fontSize:13}}/>
         </div>
