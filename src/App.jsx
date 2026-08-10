@@ -81,7 +81,6 @@ const REGULAR_ROSTER=[
   {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Blvd, Austin, TX 78735",        primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Nicholas Romano",  zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",            primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Jonathan Tarbay",  zip:"78634",address:"1001 McCormick Cv, Hutto, TX 78634",         primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
-  {name:"Jasmine Heyliger", zip:"78717",address:"14115 N Highway 183, Austin, TX 78717",      primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
   {name:"Monroe Page",      zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
   {name:"Stefan Gill",      zip:"78660",address:"13614 Letti Ln, Pflugerville, TX 78660",     primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
   {name:"Christine Keith",  zip:"78731",address:"4201 N Hills Dr, Austin, TX 78731",          primaryZone:"Zone 3",adjacentZones:["Zone 1","Zone 2","Zone 4"]},
@@ -95,6 +94,7 @@ const PRN_ROSTER=[
   {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"],telegram:"@latrisepage"},
   {name:"Yejide Myers",     zip:"78754",address:"3613 Long Day Dr, Austin, TX 78754",          primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"],telegram:"@yejideMyers"},
   {name:"Brianna Voorhies", zip:"78725",address:"4627 Senda Ln, Austin, TX 78725",             primaryZone:"Zone 4",adjacentZones:["Zone 3"],          telegram:"@BriannaVoorhies"},
+  {name:"Alicia Kae Miller",zip:"78735",address:"7701 Rialto Blvd, Austin, TX 78735",          primaryZone:"Zone 4",adjacentZones:["Zone 3"],            telegram:null},
 ];
 
 const MARKETING_TASKS=[
@@ -262,7 +262,6 @@ function autoMatch(jobs,sitters,timeOffMap){
   };
 
   return jobs.map(job=>{
-    const jobZone=getJobZone(job.jobZip);
     const timeOffs=name=>timeOffMap[name]||[];
 
     // 1. Filter: sitter not on time-off during this job's start time
@@ -272,18 +271,8 @@ function autoMatch(jobs,sitters,timeOffMap){
     if(available.length===0)
       return{...job,assignedTo:null,alternative:null,overCap:false,prnStatus:null};
 
-    // 2. Zone tier: primary → adjacent → any
-    const inPrimary=available.filter(s=>s.primaryZone===jobZone);
-    const inAdjacent=available.filter(s=>
-      s.primaryZone!==jobZone&&(s.adjacentZones||[]).includes(jobZone)
-    );
-    const anyZone=available.filter(s=>
-      !inPrimary.includes(s)&&!inAdjacent.includes(s)
-    );
-    const tierOrder=[...inPrimary,...inAdjacent,...anyZone];
-
-    // 3. Score by block count (even distribution), cap-awareness
-    const scored=tierOrder.map(s=>({
+    // 2. Score by block count — even distribution, no zone restrictions
+    const scored=available.map(s=>({
       s,count:gc(s.id,job.date,job.blockKey),
       atCap:gc(s.id,job.date,job.blockKey)>=MAX_JOBS_PER_BLOCK,
     }));
