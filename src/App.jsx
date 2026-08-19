@@ -8,7 +8,7 @@ const ZIP_COORDS={
   "78702":[30.2577,-97.7166],"78703":[30.2888,-97.7566],"78704":[30.2488,-97.7666],
   "78717":[30.4577,-97.7566],"78721":[30.2677,-97.6866],"78723":[30.3077,-97.6966],
   "78725":[30.2463,-97.6344],"78727":[30.4193,-97.7091],"78731":[30.3488,-97.7566],
-  "78735":[30.2697,-97.8466],"78745":[30.2088,-97.7866],"78746":[30.2977,-97.8066],
+  "78733":[30.3088,-97.8366],"78735":[30.2697,-97.8466],"78745":[30.2088,-97.7866],"78746":[30.2977,-97.8066],
   "78749":[30.2288,-97.8366],"78750":[30.4388,-97.7766],"78752":[30.3388,-97.7066],
   "78753":[30.3788,-97.6766],"78754":[30.3677,-97.6612],"78756":[30.3188,-97.7366],
   "78757":[30.3488,-97.7366],"78758":[30.3888,-97.7127],"78759":[30.4088,-97.7527],
@@ -86,6 +86,8 @@ const REGULAR_ROSTER=[
   {name:"Holly Slagle",     zip:"78735",address:"Austin, TX 78735",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Adrienne Paterson",zip:"78613",address:"Cedar Park, TX 78613",                       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
   {name:"Kaitlan Warmbrod", zip:"78634",address:"Hutto, TX 78634",                            primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
+  {name:"Abigail",          zip:"78733",address:"Austin, TX 78733",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Anna",             zip:"78704",address:"Austin, TX 78704",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
 ];
 const PRN_ROSTER=[
   {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"],telegram:"@latrisepage"},
