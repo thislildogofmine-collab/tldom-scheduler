@@ -86,8 +86,8 @@ const REGULAR_ROSTER=[
   {name:"Holly Slagle",     zip:"78735",address:"Austin, TX 78735",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
   {name:"Adrienne Paterson",zip:"78613",address:"Cedar Park, TX 78613",                       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"]},
   {name:"Kaitlan Warmbrod", zip:"78634",address:"Hutto, TX 78634",                            primaryZone:"Zone 2",adjacentZones:["Zone 1","Zone 3"]},
-  {name:"Abigail",          zip:"78733",address:"Austin, TX 78733",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
-  {name:"Anna",             zip:"78704",address:"Austin, TX 78704",                           primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Abagail Docimo-Ziccardi",zip:"78733",address:"Austin, TX 78733",                 primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
+  {name:"Anna Harris",             zip:"78704",address:"Austin, TX 78704",                 primaryZone:"Zone 4",adjacentZones:["Zone 3"]},
 ];
 const PRN_ROSTER=[
   {name:"Latrise Ruffin",   zip:"78727",address:"5824 Shreveport Dr, Austin, TX 78727",       primaryZone:"Zone 1",adjacentZones:["Zone 2","Zone 3"],telegram:"@latrisepage"},
@@ -123,27 +123,31 @@ function fmtDateShort(d){
   return new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
 
-// Parse TTP wall-clock time ignoring timezone offset
-function parseWallClock(iso){
-  if(!iso)return null;
-  const m=iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
-  if(!m)return null;
-  return new Date(`${m[1]}T${m[2]}:${m[3]}:00`);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // AVAILABILITY CHECK — Time Off CSV = when sitters CAN work
-// A sitter is available for a job if they have ANY availability window on that
-// date that overlaps with the job's start time (partial overlap counts).
-// If no entry exists for that date → NOT available.
+// Start/End times are wall-clock local times (ignore the -0500 offset).
+// A sitter is available if their window covers the job's start time.
+// If no entry for that date → not available.
 // ─────────────────────────────────────────────────────────────────────────────
+function parseWallClock(iso){
+  if(!iso)return null;
+  // Strip timezone offset — read as local wall-clock time
+  // "2026-08-12T11:00:00-0500" → parse "2026-08-12T11:00:00"
+  const clean=iso.replace(/[+-]\d{4}$/, "").replace(/[+-]\d{2}:\d{2}$/, "");
+  const d=new Date(clean);
+  return isNaN(d)?null:d;
+}
+
 function isSitterAvailable(dateStr, startMins, timeOffs){
   if(!timeOffs||timeOffs.length===0)return false;
   if(startMins===null||startMins===undefined)return false;
-  // Filter to entries on this date
-  const dayEntries=timeOffs.filter(to=>
-    to.startISO&&to.startISO.substring(0,10)===dateStr
-  );
+  // Find entries whose date matches
+  const dayEntries=timeOffs.filter(to=>{
+    if(!to.startISO)return false;
+    // Compare date portion only (wall-clock date)
+    const entryDate=to.startISO.substring(0,10);
+    return entryDate===dateStr;
+  });
   if(dayEntries.length===0)return false;
   return dayEntries.some(to=>{
     const s=parseWallClock(to.startISO);
@@ -152,7 +156,7 @@ function isSitterAvailable(dateStr, startMins, timeOffs){
     const base=new Date(dateStr+"T00:00:00");
     const sMin=(s-base)/60000;
     const eMin=(e-base)/60000;
-    // Job start time falls within availability window
+    // Job start time falls within the availability window
     return startMins>=sMin&&startMins<eMin;
   });
 }
@@ -289,19 +293,28 @@ function autoMatch(jobs,sitters,timeOffMap){
     blockCounts[k]=(blockCounts[k]||0)+1;
   };
 
+  // Helper: match sitter by full name OR first name
+  function findSitter(staffFull){
+    if(!staffFull||staffFull.toLowerCase()==="tldom admin")return null;
+    const sf=staffFull.toLowerCase().trim();
+    return regular.find(s=>{
+      const sn=s.name.toLowerCase().trim();
+      return sn===sf||                          // exact match
+        sf.startsWith(sn)||                     // TTP has more (e.g. "Abigail Smith" vs "Abigail")
+        sn.startsWith(sf)||                     // roster has more
+        sf.split(" ")[0]===sn.split(" ")[0];   // first name match
+    })||null;
+  }
+
   // Pre-count already-assigned jobs so even distribution stays accurate
   jobs.forEach(job=>{
-    const existing=regular.find(s=>
-      s.name.toLowerCase()===job.staffFull.toLowerCase()
-    );
+    const existing=findSitter(job.staffFull);
     if(existing)ic(existing.id,job.date,job.blockKey);
   });
 
   return jobs.map(job=>{
     // ── Already assigned to a real sitter in TTP ──────────────────────────
-    const existing=regular.find(s=>
-      s.name.toLowerCase()===job.staffFull.toLowerCase()
-    );
+    const existing=findSitter(job.staffFull);
     if(existing){
       return{...job,assignedTo:existing,alternative:null,overCap:false,prnStatus:null,fromTTP:true};
     }
